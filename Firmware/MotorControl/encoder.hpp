@@ -48,10 +48,15 @@ public:
                                                 // 1024 counts in one 125 us sample = 180 turn/s for a 14-bit encoder.
         bool abs_spi_reject_error_flag = false; // drop AMS frames with the error flag (bit 14) set. Off by default:
                                                 // the flag is sticky until the chip's ERRFL register is read.
+        bool abs_spi_check_parity = false;      // drop AMS frames with odd parity. Valid for an AS5047P (bit 15 =
+                                                // even parity); an AS5047U has no parity bit, so off by default.
         // XDRIVE: per-angle correction of an absolute encoder.
         bool correction_enabled = false;              // add correction_table to the raw absolute position
         std::array<float, 256> correction_table = {}; // [counts] correction at the centre of each 1/256-turn bin
         float correction_scan_turns = 1.0f;           // mechanical turns each way in ENCODER_CORRECTION_CALIBRATION
+        uint8_t correction_max_harmonic = 12;         // keep harmonics 1..N per turn of the measured error (0 = raw bins).
+                                                      // Higher orders are cogging pulling the rotor off the field during
+                                                      // the open-loop sweep (36x/42x on a 36N42P motor), not encoder error.
 
 
         // custom setters
@@ -124,6 +129,8 @@ public:
     uint32_t spi_error_flag_count_ = 0;     // AMS frames with bit 14 (error flag) set
     uint32_t spi_warning_flag_count_ = 0;   // AMS frames with bit 15 set (AS5047U: warning; AS5047P: parity)
     uint32_t spi_jump_count_ = 0;           // samples dropped by config.abs_spi_max_jump
+    uint32_t spi_parity_error_count_ = 0;   // AMS frames with odd parity (counted whether or not they're dropped)
+    uint32_t abs_spi_good_frames_ = 0;      // accepted samples; the jump filter waits for 16 (boot garbage)
     uint16_t spi_last_frame_ = 0;           // last raw AMS frame
     uint8_t abs_spi_jumps_in_row_ = 0;
     bool abs_spi_have_last_ = false;

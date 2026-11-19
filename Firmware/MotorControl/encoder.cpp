@@ -572,12 +572,32 @@ bool Encoder::run_correction_calibration() {
         return false;
     }
     mean /= 256.0f;
+    for (int k = 0; k < 256; ++k) e[k] -= mean;
+    // Keep harmonics 1..correction_max_harmonic per turn (DFT over the bin centres, then rebuild).
+    const int hmax = std::min<int>(config_.correction_max_harmonic, 127);
+    if (hmax > 0) {
+        float smooth[256] = {};
+        for (int h = 1; h <= hmax; ++h) {
+            float c = 0.0f, s = 0.0f;
+            for (int k = 0; k < 256; ++k) {
+                float a = 2.0f * M_PI * (float)h * ((float)k + 0.5f) / 256.0f;
+                c += e[k] * our_arm_cos_f32(a);
+                s += e[k] * our_arm_sin_f32(a);
+            }
+            c *= 2.0f / 256.0f;
+            s *= 2.0f / 256.0f;
+            for (int k = 0; k < 256; ++k) {
+                float a = 2.0f * M_PI * (float)h * ((float)k + 0.5f) / 256.0f;
+                smooth[k] += c * our_arm_cos_f32(a) + s * our_arm_sin_f32(a);
+            }
+        }
+        for (int k = 0; k < 256; ++k) e[k] = smooth[k];
+    }
     float ss = 0.0f, pk = 0.0f;
     for (int k = 0; k < 256; ++k) {
-        float v = e[k] - mean;
-        ss += v * v;
-        pk = std::max(pk, std::abs(v));
-        config_.correction_table[k] = -v;
+        ss += e[k] * e[k];
+        pk = std::max(pk, std::abs(e[k]));
+        config_.correction_table[k] = -e[k];
     }
     correction_rms_ = sqrtf(ss / 256.0f);
     correction_peak_ = pk;
@@ -701,6 +721,12 @@ void Encoder::abs_spi_cb(bool success) {
             if (rawVal >> 15) {
                 spi_warning_flag_count_++;
             }
+            if (ams_parity(rawVal)) {
+                spi_parity_error_count_++;
+                if (config_.abs_spi_check_parity) {
+                    goto done;
+                }
+            }
             if ((rawVal >> 14) & 1) {
                 spi_error_flag_count_++;
                 if (config_.abs_spi_reject_error_flag) {
@@ -739,7 +765,7 @@ void Encoder::abs_spi_cb(bool success) {
     // (a corrupted frame). Dropped samples count as missed reads in update(), whose spi_error_rate
     // filter raises ERROR_ABS_SPI_COM_FAIL if they persist; after 3 in a row the new value is
     // accepted, so a real step (e.g. at startup) can't lock the reading out.
-    if (config_.abs_spi_max_jump != 0 && abs_spi_have_last_) {
+    if (config_.abs_spi_max_jump != 0 && abs_spi_have_last_ && abs_spi_good_frames_ >= 16) {
         int32_t cpr = config_.cpr;
         int32_t d = (int32_t)pos - pos_abs_raw_;
         if (d >= cpr / 2) d -= cpr;
@@ -752,6 +778,7 @@ void Encoder::abs_spi_cb(bool success) {
     }
     abs_spi_jumps_in_row_ = 0;
     abs_spi_have_last_ = true;
+    if (abs_spi_good_frames_ < 0xFFFFFFFFu) abs_spi_good_frames_++;
     pos_abs_raw_ = pos;
 
     // XDRIVE: per-angle correction. Rounded to whole counts: 0.5 count is 0.01 deg

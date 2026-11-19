@@ -1300,6 +1300,7 @@ interfaces:
       spi_warning_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with bit 15 set (AS5047U warning flag; AS5047P parity)."}
       spi_jump_count: {type: readonly uint32, doc: "XDRIVE: samples dropped because they jumped further than config.abs_spi_max_jump."}
       spi_last_frame: {type: readonly uint16, doc: "XDRIVE: last raw AMS SPI frame."}
+      spi_parity_error_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with odd parity (meaningful for an AS5047P)."}
       pos_abs_raw: {type: readonly int32, doc: "XDRIVE: last good raw absolute position, before the correction table."}
       correction_rms: {type: readonly float32, unit: counts, doc: "XDRIVE: rms encoder error measured by the last correction calibration."}
       correction_peak: {type: readonly float32, unit: counts, doc: "XDRIVE: largest |error| measured by the last correction calibration."}
@@ -1336,6 +1337,12 @@ interfaces:
             type: float32
             unit: turns
             doc: "XDRIVE: mechanical turns each way for AXIS_STATE_ENCODER_CORRECTION_CALIBRATION."
+          correction_max_harmonic:
+            type: uint8
+            doc: "XDRIVE: the correction calibration keeps harmonics 1..N per turn of the measured error (0 = raw bins). Higher orders are cogging, not encoder error."
+          abs_spi_check_parity:
+            type: bool
+            doc: "XDRIVE: drop AMS frames with odd parity. For an AS5047P (bit 15 = even parity); an AS5047U has none."
           abs_spi_reject_error_flag:
             type: bool
             doc: "XDRIVE: drop AMS frames with the error flag set. Off by default; the flag is sticky until the chip's ERRFL register is read."

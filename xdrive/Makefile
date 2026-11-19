@@ -1,9 +1,9 @@
 # Build the firmware from anywhere: `make -C xdrive` (or `cd xdrive && make`).
-# Targets: all (default), verify-makerbase, asm, size, clean. Variables: TOOLCHAIN, MAKERBASE_VERSION.
+# Targets: all (default), asm, size, clean. Variable: TOOLCHAIN.
 HERE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: all verify-makerbase asm size clean venv
-all verify-makerbase asm size clean: venv
+.PHONY: all asm size clean venv
+all asm size clean: venv
 	$(MAKE) -C $(HERE)../Firmware -f ../xdrive/firmware.mk $@
 
 # Python env for the code generators (jinja2, PyYAML, jsonschema), via uv.

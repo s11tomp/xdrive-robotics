@@ -8,20 +8,26 @@ reference material.
 - `upstream`: upstream ODrive snapshots, tagged `upstream/fw-v0.5.1` and `upstream/fw-v0.5.6`.
   They come from GitHub tarballs, so there's no upstream history. The 0.5.6 snapshot leaves out the
   five prebuilt `libfibre-*` tool binaries (Git LFS pointers only).
-- `main`: `upstream/fw-v0.5.1` + Makerbase's fw-v0.5.1-20250326 changes (one commit) + our work.
-  To port our work to 0.5.6: `git rebase --onto upstream/fw-v0.5.6 upstream/fw-v0.5.1 <branch>`.
+- `main`: **ODrive v0.5.6** (merged from `upstream` on 2026-11-18) + the Mini changes + our work.
+  - Makerbase's v0.5.1 changes are commit 8ebfc62.
+  - Tag `xdrive/v0.5.1` is the last v0.5.1-based state. It holds the byte-identical build described below.
+- **Mini changes on v0.5.6:**
+  - **Second DRV8301 marked not populated** (`-DXDRIVE_MINI`, `board.cpp`). v0.5.6 retries every idle motor's gate-driver setup every millisecond. For the missing second driver, that meant endless SPI traffic on the bus the encoder shares. This is the likely reason stock v0.5.6 "doesn't drive the Mini".
+  - **The AS5047U parity check stays disabled**, as Makerbase had it.
+  - **Makerbase's two other encoder patches were dropped:** v0.5.6 already makes a pre-calibrated SPI absolute encoder ready on its first valid read.
 
 ## Toolchain
-GNU Arm Embedded **7-2018-q2-update** (GCC 7.3.1), the compiler Makerbase used. Only an Intel
-build exists for macOS; it runs under Rosetta 2.
+`main` (v0.5.6) builds with GNU Arm Embedded **10.3-2021.10** (GCC 10.3.1), the version v0.5.6's CI
+used (Ubuntu's `gcc-arm-none-eabi`). Only an Intel build exists for macOS; it runs under Rosetta 2.
 ```sh
 mkdir -p ~/.local/arm/dl && cd ~/.local/arm/dl
-curl -LO https://developer.arm.com/-/media/Files/downloads/gnu-rm/7-2018q2/gcc-arm-none-eabi-7-2018-q2-update-mac.tar.bz2
-md5 gcc-arm-none-eabi-7-2018-q2-update-mac.tar.bz2      # a66be9828cf3c57d7d21178e07cd8904
-cd .. && tar -xjf dl/gcc-arm-none-eabi-7-2018-q2-update-mac.tar.bz2
+curl -LO https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-mac.tar.bz2
+md5 gcc-arm-none-eabi-10.3-2021.10-mac.tar.bz2          # 7f2a7b7b23797302a9d6182c6e482449
+cd .. && tar -xjf dl/gcc-arm-none-eabi-10.3-2021.10-mac.tar.bz2
 ```
-The build looks for it in `~/.local/arm/gcc-arm-none-eabi-7-2018-q2-update/bin/`. Override with
-`TOOLCHAIN=<dir>/` to use another compiler. The code generators need `uv`; the Makefile creates
+The build looks for it in `~/.local/arm/gcc-arm-none-eabi-10.3-2021.10/bin/`. Override with
+`TOOLCHAIN=<dir>/`. The tag `xdrive/v0.5.1` uses Makerbase's compiler, 7-2018-q2-update
+(`.../7-2018q2/gcc-arm-none-eabi-7-2018-q2-update-mac.tar.bz2`, md5 a66be9828cf3c57d7d21178e07cd8904). The code generators need `uv`; the Makefile creates
 `xdrive/.venv` from `requirements.txt` by itself.
 
 ## Build
@@ -30,15 +36,14 @@ make -C xdrive -j8          # -> Firmware/build/ODriveFirmware.{elf,hex,bin,map}
 make -C xdrive asm          # disassembly -> Firmware/build/ODriveFirmware.asm
 make -C xdrive clean
 ```
-- **Why not tup:** ODrive builds with tup, which needs FUSE, and macOS doesn't have it. `firmware.mk`
-  replays the commands from tup's database in Makerbase's archive instead: same flags, defines and
-  include order. `sources.mk` holds the source lists, in their link order.
-- **Adding a source file:** add it to `LINK_SRCS` and to the `*_SRCS` list for its flag set
-  (`BOARD_C` = ST HAL / board, `ODRIVE_C`, `CXX`, `ASM`).
-- **Version:** default builds take it from `git describe` and report fw 0.5.1 (unreleased).
-  Makerbase's build reports 0.0.0.
+- **Why not tup:** ODrive builds with tup, which needs FUSE, and macOS doesn't have it.
+  `sources.mk` transcribes the v3.6-56V board configuration from `Firmware/Tupfile.lua`: sources,
+  include order and package flags. `firmware.mk` adds Tupfile.lua's global flags and `-DXDRIVE_MINI`.
+- **Adding a source file:** add it to the right list in `sources.mk`.
+- **Version:** taken from `git describe` (e.g. 0.5.6-dev).
 
-## Verified: byte-identical to the board's firmware (2026-11-18)
+## At tag `xdrive/v0.5.1`: byte-identical to Makerbase's firmware (verified 2026-11-18)
+These instructions apply to a checkout of the tag (its `firmware.mk` has `MAKERBASE_VERSION`/`LIB_OVERRIDE`).
 ```sh
 # The Windows release's target libraries; Makerbase linked against these.
 cd ~/.local/arm/dl && curl -LO https://developer.arm.com/-/media/Files/downloads/gnu-rm/7-2018q2/gcc-arm-none-eabi-7-2018-q2-update-win32.zip

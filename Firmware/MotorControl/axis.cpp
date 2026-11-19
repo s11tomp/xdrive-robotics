@@ -561,6 +561,12 @@ void Axis::run_state_machine_loop() {
                 status = encoder_.run_offset_calibration();
             } break;
 
+            case AXIS_STATE_ENCODER_CORRECTION_CALIBRATION: {  // XDRIVE
+                if (!motor_.is_calibrated_ || !encoder_.is_ready_)
+                    goto invalid_state_label;
+                status = encoder_.run_correction_calibration();
+            } break;
+
             case AXIS_STATE_LOCKIN_SPIN: {
                 //if (odrv.any_error())
                 //    goto invalid_state_label;

@@ -462,6 +462,129 @@ bool Encoder::run_offset_calibration() {
     return true;
 }
 
+// XDRIVE: correction table lookup. Entry k is the correction at
+// the centre of bin k, i.e. at raw = (k + 0.5) * cpr / 256; linear interpolation, circular.
+float Encoder::correction_at(int32_t raw) const {
+    float x = (float)raw * (256.0f / (float)config_.cpr) - 0.5f;
+    int32_t k0 = (int32_t)floorf(x);
+    float f = x - (float)k0;
+    const auto& t = config_.correction_table;
+    return t[k0 & 255] * (1.0f - f) + t[(k0 + 1) & 255] * f;
+}
+
+// XDRIVE: measure the absolute encoder's error against the angle of
+// an open-loop current vector (calibration_current) turned slowly (calib_scan_omega) forward and back
+// over correction_scan_turns mechanical turns, as moteus' calibrate_encoder.py does. The rotor lags
+// the field by a friction angle whose sign flips with direction, so the two directions are averaged.
+// The mean (a constant offset, which phase_offset covers) is removed. The result is stored in
+// config_.correction_table and enabled; re-run the offset calibration afterwards.
+// Needs a calibrated motor and a ready encoder (offset calibration done, so direction is known).
+bool Encoder::run_correction_calibration() {
+    const float start_lock_duration = 1.0f;
+    static float s_sum[2][256];
+    static uint32_t s_n[2][256];
+
+    if (!(mode_ & MODE_FLAG_ABS) || config_.direction == 0) {
+        set_error(ERROR_UNSUPPORTED_ENCODER_MODE);
+        return false;
+    }
+    for (int d = 0; d < 2; ++d) {
+        for (int k = 0; k < 256; ++k) { s_sum[d][k] = 0.0f; s_n[d][k] = 0; }
+    }
+
+    correction_active_ = false;  // measure on raw positions
+    const float pole_pairs = (float)axis_->motor_.config_.pole_pairs;
+    const float scan = config_.correction_scan_turns * 2.0f * M_PI * pole_pairs;  // [rad electrical] each way
+    const float counts_per_rad_e = (float)config_.cpr / (2.0f * M_PI * pole_pairs);
+
+    CRITICAL_SECTION() {
+        axis_->open_loop_controller_.Idq_setpoint_ = {0.0f, 0.0f};
+        axis_->open_loop_controller_.Vdq_setpoint_ = {0.0f, 0.0f};
+        axis_->open_loop_controller_.phase_ = 0.0f;
+        axis_->open_loop_controller_.phase_vel_ = 0.0f;
+
+        float max_current_ramp = axis_->motor_.config_.calibration_current / start_lock_duration * 2.0f;
+        axis_->open_loop_controller_.max_current_ramp_ = max_current_ramp;
+        axis_->open_loop_controller_.max_voltage_ramp_ = max_current_ramp;
+        axis_->open_loop_controller_.max_phase_vel_ramp_ = INFINITY;
+        axis_->open_loop_controller_.target_current_ = axis_->motor_.config_.motor_type != Motor::MOTOR_TYPE_GIMBAL ? axis_->motor_.config_.calibration_current : 0.0f;
+        axis_->open_loop_controller_.target_voltage_ = axis_->motor_.config_.motor_type != Motor::MOTOR_TYPE_GIMBAL ? 0.0f : axis_->motor_.config_.calibration_current;
+        axis_->open_loop_controller_.target_vel_ = 0.0f;
+        axis_->open_loop_controller_.total_distance_ = 0.0f;
+        axis_->open_loop_controller_.phase_ = axis_->open_loop_controller_.initial_phase_ = 0.0f;
+
+        axis_->motor_.current_control_.enable_current_control_src_ = (axis_->motor_.config_.motor_type != Motor::MOTOR_TYPE_GIMBAL);
+        axis_->motor_.current_control_.Idq_setpoint_src_.connect_to(&axis_->open_loop_controller_.Idq_setpoint_);
+        axis_->motor_.current_control_.Vdq_setpoint_src_.connect_to(&axis_->open_loop_controller_.Vdq_setpoint_);
+        axis_->motor_.current_control_.phase_src_.connect_to(&axis_->open_loop_controller_.phase_);
+        axis_->acim_estimator_.rotor_phase_src_.connect_to(&axis_->open_loop_controller_.phase_);
+        axis_->motor_.phase_vel_src_.connect_to(&axis_->open_loop_controller_.phase_vel_);
+        axis_->motor_.current_control_.phase_vel_src_.connect_to(&axis_->open_loop_controller_.phase_vel_);
+        axis_->acim_estimator_.rotor_phase_vel_src_.connect_to(&axis_->open_loop_controller_.phase_vel_);
+    }
+    axis_->wait_for_control_iteration();
+    axis_->motor_.arm(&axis_->motor_.current_control_);
+
+    bool ok = true;
+    for (size_t i = 0; i < (size_t)(start_lock_duration * 1000.0f); ++i) {
+        if (!axis_->motor_.is_armed_ || axis_->requested_state_ != Axis::AXIS_STATE_UNDEFINED) { ok = false; break; }
+        osDelay(1);
+    }
+    const int32_t c0 = shadow_count_;
+
+    for (int dir = 0; ok && dir < 2; ++dir) {
+        CRITICAL_SECTION() {
+            axis_->open_loop_controller_.target_vel_ = dir == 0 ? config_.calib_scan_omega : -config_.calib_scan_omega;
+        }
+        while (true) {
+            if (!axis_->motor_.is_armed_ || axis_->requested_state_ != Axis::AXIS_STATE_UNDEFINED) { ok = false; break; }
+            float dist = axis_->open_loop_controller_.total_distance_.any().value_or(0.0f);
+            if (dir == 0 ? dist >= scan : dist <= 0.0f) break;
+            float expected = (float)config_.direction * dist * counts_per_rad_e;   // [counts] since c0
+            float err = (float)(shadow_count_ - c0) - expected;
+            int32_t bin = (count_in_cpr_ * 256) / config_.cpr;
+            if (bin >= 0 && bin < 256) { s_sum[dir][bin] += err; s_n[dir][bin]++; }
+            osDelay(1);
+        }
+    }
+    if (axis_->motor_.is_armed_) {
+        axis_->motor_.disarm();
+    }
+    correction_active_ = true;
+    if (!ok) {
+        return false;
+    }
+
+    // Average the two directions per bin, remove the mean, store the negated error.
+    float e[256];
+    float mean = 0.0f;
+    uint32_t bins = 0;
+    for (int k = 0; k < 256; ++k) {
+        if (s_n[0][k] && s_n[1][k]) {
+            e[k] = 0.5f * (s_sum[0][k] / (float)s_n[0][k] + s_sum[1][k] / (float)s_n[1][k]);
+            mean += e[k];
+            bins++;
+        }
+    }
+    correction_bins_ = bins;
+    if (bins < 256) {
+        set_error(ERROR_NO_RESPONSE);  // the scan didn't cover every bin in both directions
+        return false;
+    }
+    mean /= 256.0f;
+    float ss = 0.0f, pk = 0.0f;
+    for (int k = 0; k < 256; ++k) {
+        float v = e[k] - mean;
+        ss += v * v;
+        pk = std::max(pk, std::abs(v));
+        config_.correction_table[k] = -v;
+    }
+    correction_rms_ = sqrtf(ss / 256.0f);
+    correction_peak_ = pk;
+    config_.correction_enabled = true;
+    return true;
+}
+
 static bool decode_hall(uint8_t hall_state, int32_t* hall_cnt) {
     switch (hall_state) {
         case 0b001: *hall_cnt = 0; return true;
@@ -618,7 +741,7 @@ void Encoder::abs_spi_cb(bool success) {
     // accepted, so a real step (e.g. at startup) can't lock the reading out.
     if (config_.abs_spi_max_jump != 0 && abs_spi_have_last_) {
         int32_t cpr = config_.cpr;
-        int32_t d = (int32_t)pos - pos_abs_;
+        int32_t d = (int32_t)pos - pos_abs_raw_;
         if (d >= cpr / 2) d -= cpr;
         if (d < -cpr / 2) d += cpr;
         if ((d > config_.abs_spi_max_jump || d < -(int32_t)config_.abs_spi_max_jump) && abs_spi_jumps_in_row_ < 3) {
@@ -629,8 +752,20 @@ void Encoder::abs_spi_cb(bool success) {
     }
     abs_spi_jumps_in_row_ = 0;
     abs_spi_have_last_ = true;
+    pos_abs_raw_ = pos;
 
-    pos_abs_ = pos;
+    // XDRIVE: per-angle correction. Rounded to whole counts: 0.5 count is 0.01 deg
+    // mechanical, 0.23 deg electrical at 21 pole pairs. Commutation and the PLL both use pos_abs_.
+    {
+        int32_t p = pos;
+        if (config_.correction_enabled && correction_active_) {
+            int32_t cpr = config_.cpr;
+            p += (int32_t)floorf(correction_at(pos) + 0.5f);
+            if (p < 0) p += cpr;
+            if (p >= cpr) p -= cpr;
+        }
+        pos_abs_ = p;
+    }
     abs_spi_pos_updated_ = true;
     if (config_.pre_calibrated) {
         is_ready_ = true;

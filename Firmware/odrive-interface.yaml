@@ -1300,6 +1300,10 @@ interfaces:
       spi_warning_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with bit 15 set (AS5047U warning flag; AS5047P parity)."}
       spi_jump_count: {type: readonly uint32, doc: "XDRIVE: samples dropped because they jumped further than config.abs_spi_max_jump."}
       spi_last_frame: {type: readonly uint16, doc: "XDRIVE: last raw AMS SPI frame."}
+      pos_abs_raw: {type: readonly int32, doc: "XDRIVE: last good raw absolute position, before the correction table."}
+      correction_rms: {type: readonly float32, unit: counts, doc: "XDRIVE: rms encoder error measured by the last correction calibration."}
+      correction_peak: {type: readonly float32, unit: counts, doc: "XDRIVE: largest |error| measured by the last correction calibration."}
+      correction_bins: {type: readonly uint32, doc: "XDRIVE: bins the last correction calibration covered in both directions (256 = all)."}
       config:
         c_is_class: False
         attributes:
@@ -1325,6 +1329,13 @@ interfaces:
             type: uint16
             unit: counts
             doc: "XDRIVE: drop an absolute-encoder sample that is further than this from the last good one (0 = off). Accepted after 3 in a row."
+          correction_enabled:
+            type: bool
+            doc: "XDRIVE: add the correction table (get_correction/set_correction) to the raw absolute position."
+          correction_scan_turns:
+            type: float32
+            unit: turns
+            doc: "XDRIVE: mechanical turns each way for AXIS_STATE_ENCODER_CORRECTION_CALIBRATION."
           abs_spi_reject_error_flag:
             type: bool
             doc: "XDRIVE: drop AMS frames with the error flag set. Off by default; the flag is sticky until the chip's ERRFL register is read."
@@ -1376,6 +1387,8 @@ interfaces:
             type: int32
             unit: counts
         doc: Set the current linear position of the axis, in counts
+      get_correction: {in: {index: uint32}, out: {val: float32}, doc: "XDRIVE: correction table entry (0..255), counts."}
+      set_correction: {in: {index: uint32, val: float32}, doc: "XDRIVE: set a correction table entry (0..255), counts."}
 
 
   ODrive.SensorlessEstimator:
@@ -1590,6 +1603,12 @@ valuetypes:
         brief: Rotate the motor for 30s to calibrate hall sensor edge offsets
         doc:
           The phase offset is not calibrated at this time, so the map is only relative
+      ENCODER_CORRECTION_CALIBRATION:
+        brief: "XDRIVE: measure the absolute encoder's per-angle error and fill encoder.config.correction_table"
+        doc:
+          Turns an open-loop current vector (calibration_current, calib_scan_omega) forward and back over
+          encoder.config.correction_scan_turns mechanical turns. Needs a calibrated motor and a ready encoder.
+          Re-run ENCODER_OFFSET_CALIBRATION afterwards, then save.
 
   ODrive.Encoder.Mode:
     values:

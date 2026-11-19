@@ -48,6 +48,10 @@ public:
                                                 // 1024 counts in one 125 us sample = 180 turn/s for a 14-bit encoder.
         bool abs_spi_reject_error_flag = false; // drop AMS frames with the error flag (bit 14) set. Off by default:
                                                 // the flag is sticky until the chip's ERRFL register is read.
+        // XDRIVE: per-angle correction of an absolute encoder.
+        bool correction_enabled = false;              // add correction_table to the raw absolute position
+        std::array<float, 256> correction_table = {}; // [counts] correction at the centre of each 1/256-turn bin
+        float correction_scan_turns = 1.0f;           // mechanical turns each way in ENCODER_CORRECTION_CALIBRATION
 
 
         // custom setters
@@ -123,6 +127,16 @@ public:
     uint16_t spi_last_frame_ = 0;           // last raw AMS frame
     uint8_t abs_spi_jumps_in_row_ = 0;
     bool abs_spi_have_last_ = false;
+    // XDRIVE: encoder correction table.
+    int32_t pos_abs_raw_ = 0;            // last good raw absolute position, before correction
+    bool correction_active_ = true;      // cleared while the correction calibration runs
+    float correction_rms_ = 0.0f;        // [counts] rms of the error the last correction calibration measured
+    float correction_peak_ = 0.0f;       // [counts] largest |error| it measured
+    uint32_t correction_bins_ = 0;       // bins with samples in both directions (256 = full coverage)
+    float correction_at(int32_t raw) const;
+    bool run_correction_calibration();
+    float get_correction(uint32_t index) { return index < 256 ? config_.correction_table[index] : 0.0f; }
+    void set_correction(uint32_t index, float val) { if (index < 256) config_.correction_table[index] = val; }
 
     OutputPort<float> pos_estimate_ = 0.0f; // [turn]
     OutputPort<float> vel_estimate_ = 0.0f; // [turn/s]

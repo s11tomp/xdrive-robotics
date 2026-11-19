@@ -270,9 +270,10 @@ int odrive_main(void) {
     }
 
     // Setup motors (DRV8301 SPI transactions here)
-    for(auto& axis : axes){
+    /*for(auto& axis : axes){
         axis->motor_.setup();
-    }
+    }*/
+    axes[0]->motor_.setup();
 
     // Setup encoders (Starts encoder SPI transactions)
     for(auto& axis : axes){

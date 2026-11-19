@@ -569,13 +569,21 @@ void Encoder::abs_spi_cb(bool success) {
     switch (mode_) {
         case MODE_SPI_ABS_AMS: {
             uint16_t rawVal = abs_spi_dma_rx_[0];
-            // check if parity is correct (even) and error flag clear
-            // XDRIVE Mini (Makerbase): the AS5047U's 16-bit frame has no parity bit, so ODrive's
-            // parity check rejects about half of the frames. Disabled as in Makerbase's build;
-            // replaced by an error-flag check.
-            // if (ams_parity(rawVal) || ((rawVal >> 14) & 1)) {
-            //     goto done;
-            // }
+            // XDRIVE: no parity check. The AS5047U's 16-bit frame has no parity bit (bit 15 is a
+            // warning flag), so ODrive's parity check rejected about half of the frames; Makerbase
+            // disabled it. Count the flags instead, and optionally drop frames with the error flag
+            // (sticky until ERRFL is read, so off by default).
+            spi_frame_count_++;
+            spi_last_frame_ = rawVal;
+            if (rawVal >> 15) {
+                spi_warning_flag_count_++;
+            }
+            if ((rawVal >> 14) & 1) {
+                spi_error_flag_count_++;
+                if (config_.abs_spi_reject_error_flag) {
+                    goto done;
+                }
+            }
             pos = rawVal & 0x3fff;
         } break;
 
@@ -603,6 +611,24 @@ void Encoder::abs_spi_cb(bool success) {
            goto done;
         } break;
     }
+
+    // XDRIVE: drop a sample that jumps further than physically possible from the last good one
+    // (a corrupted frame). Dropped samples count as missed reads in update(), whose spi_error_rate
+    // filter raises ERROR_ABS_SPI_COM_FAIL if they persist; after 3 in a row the new value is
+    // accepted, so a real step (e.g. at startup) can't lock the reading out.
+    if (config_.abs_spi_max_jump != 0 && abs_spi_have_last_) {
+        int32_t cpr = config_.cpr;
+        int32_t d = (int32_t)pos - pos_abs_;
+        if (d >= cpr / 2) d -= cpr;
+        if (d < -cpr / 2) d += cpr;
+        if ((d > config_.abs_spi_max_jump || d < -(int32_t)config_.abs_spi_max_jump) && abs_spi_jumps_in_row_ < 3) {
+            spi_jump_count_++;
+            abs_spi_jumps_in_row_++;
+            goto done;
+        }
+    }
+    abs_spi_jumps_in_row_ = 0;
+    abs_spi_have_last_ = true;
 
     pos_abs_ = pos;
     abs_spi_pos_updated_ = true;

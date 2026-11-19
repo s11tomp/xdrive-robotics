@@ -1295,6 +1295,11 @@ interfaces:
         type: int32
         doc: The last (valid) position from an absolute encoder, if used.
       spi_error_rate: readonly float32
+      spi_frame_count: {type: readonly uint32, doc: "XDRIVE: absolute-encoder SPI frames received."}
+      spi_error_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with the error flag (bit 14) set."}
+      spi_warning_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with bit 15 set (AS5047U warning flag; AS5047P parity)."}
+      spi_jump_count: {type: readonly uint32, doc: "XDRIVE: samples dropped because they jumped further than config.abs_spi_max_jump."}
+      spi_last_frame: {type: readonly uint16, doc: "XDRIVE: last raw AMS SPI frame."}
       config:
         c_is_class: False
         attributes:
@@ -1316,6 +1321,13 @@ interfaces:
             type: uint16
             c_setter: set_abs_spi_cs_gpio_pin
             doc: Make sure that the GPIO is in `GPIO_MODE_DIGITAL`.
+          abs_spi_max_jump:
+            type: uint16
+            unit: counts
+            doc: "XDRIVE: drop an absolute-encoder sample that is further than this from the last good one (0 = off). Accepted after 3 in a row."
+          abs_spi_reject_error_flag:
+            type: bool
+            doc: "XDRIVE: drop AMS frames with the error flag set. Off by default; the flag is sticky until the chip's ERRFL register is read."
           cpr: 
             type: int32
             doc: Counts per Revolution of the encoder.  This is 4x the Pulses per Revolution.

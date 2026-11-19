@@ -43,6 +43,11 @@ public:
         uint16_t abs_spi_cs_gpio_pin = 1;
         uint16_t sincos_gpio_pin_sin = 3;
         uint16_t sincos_gpio_pin_cos = 4;
+        // XDRIVE: SPI absolute encoder integrity.
+        uint16_t abs_spi_max_jump = 1024;       // [counts] drop a sample further than this from the last good one (0 = off).
+                                                // 1024 counts in one 125 us sample = 180 turn/s for a 14-bit encoder.
+        bool abs_spi_reject_error_flag = false; // drop AMS frames with the error flag (bit 14) set. Off by default:
+                                                // the flag is sticky until the chip's ERRFL register is read.
 
 
         // custom setters
@@ -110,6 +115,14 @@ public:
     float calib_scan_response_ = 0.0f; // debug report from offset calib
     int32_t pos_abs_ = 0;
     float spi_error_rate_ = 0.0f;
+    // XDRIVE: SPI absolute encoder diagnostics (counted in abs_spi_cb).
+    uint32_t spi_frame_count_ = 0;          // frames received
+    uint32_t spi_error_flag_count_ = 0;     // AMS frames with bit 14 (error flag) set
+    uint32_t spi_warning_flag_count_ = 0;   // AMS frames with bit 15 set (AS5047U: warning; AS5047P: parity)
+    uint32_t spi_jump_count_ = 0;           // samples dropped by config.abs_spi_max_jump
+    uint16_t spi_last_frame_ = 0;           // last raw AMS frame
+    uint8_t abs_spi_jumps_in_row_ = 0;
+    bool abs_spi_have_last_ = false;
 
     OutputPort<float> pos_estimate_ = 0.0f; // [turn]
     OutputPort<float> vel_estimate_ = 0.0f; // [turn/s]

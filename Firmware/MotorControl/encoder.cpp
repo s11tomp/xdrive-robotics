@@ -481,8 +481,12 @@ float Encoder::correction_at(int32_t raw) const {
 // Needs a calibrated motor and a ready encoder (offset calibration done, so direction is known).
 bool Encoder::run_correction_calibration() {
     const float start_lock_duration = 1.0f;
+    // Work arrays are static: the axis thread's stack is only 2 KB (axis.hpp stack_size_), and two
+    // float[256] locals overflowed it (2026-11-19: froze the scheduler mid-calibration).
     static float s_sum[2][256];
     static uint32_t s_n[2][256];
+    static float e[256];
+    static float smooth[256];
 
     if (!(mode_ & MODE_FLAG_ABS) || config_.direction == 0) {
         set_error(ERROR_UNSUPPORTED_ENCODER_MODE);
@@ -556,7 +560,6 @@ bool Encoder::run_correction_calibration() {
     }
 
     // Average the two directions per bin, remove the mean, store the negated error.
-    float e[256];
     float mean = 0.0f;
     uint32_t bins = 0;
     for (int k = 0; k < 256; ++k) {
@@ -576,7 +579,7 @@ bool Encoder::run_correction_calibration() {
     // Keep harmonics 1..correction_max_harmonic per turn (DFT over the bin centres, then rebuild).
     const int hmax = std::min<int>(config_.correction_max_harmonic, 127);
     if (hmax > 0) {
-        float smooth[256] = {};
+        for (int k = 0; k < 256; ++k) smooth[k] = 0.0f;
         for (int h = 1; h <= hmax; ++h) {
             float c = 0.0f, s = 0.0f;
             for (int k = 0; k < 256; ++k) {

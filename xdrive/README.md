@@ -56,4 +56,23 @@ the vector table, which isn't programmed from a hex.
   running firmware exactly, so any change from here on is only what we add.
 
 ## Flashing
-Not set up yet. The restore image is a whole-flash SWD backup.
+Flash over SWD (ST-Link + OpenOCD) with `swd_flash.py`.
+```sh
+cd <tools directory>
+python scripts/swd_flash.py --elf ../firmware/Firmware/build/ODriveFirmware.elf           # dry run
+python scripts/swd_flash.py --elf ../firmware/Firmware/build/ODriveFirmware.elf --write   # flash
+python scripts/swd_flash.py --bin firmware/backups/<dir>/flash.bin --write                 # restore a backup
+```
+- **Checks:** the SWD and USB serials must match. The script sets IDLE and takes a pre-flash
+  backup, reusing an identical existing one.
+- **Write:** erases only the sectors the image covers. The config lives in sectors 10–11, so it
+  stays. Then it verifies and resets: ⚠️ the board reboots and calibrates, and the motor moves.
+- **Read-back:** reads the whole flash and checks it.
+- **Wiring:** J2 GND/SWCLK/SWDIO, plus NRST to the ST-Link's RST, so a crashed build can still be
+  reached with connect-under-reset.
+
+**Round trip, 2026-11-18:** flashed the byte-identical build (`MAKERBASE_VERSION=1 LIB_OVERRIDE=…`).
+- 233,024 bytes written in 6.5 s and verified.
+- The read-back was clean. The only change on the chip was the vector-table gap (`FF` → `00`), so it
+  now equals Makerbase's `.bin` exactly.
+- The board rebooted, calibrated and reached closed loop, with no errors and its config unchanged.

@@ -22,7 +22,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
 - Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
-- The second motor's pins (gate drive, gate driver chip select, encoder index) are in analog mode; the Mini leaves them unconnected.
+- The second motor's gate drive and gate driver chip select pins are in analog mode; the Mini leaves them unconnected.
 
 ### Removed
 - The second axis (`axis1`) and everything that served it: the second motor's gate driver, PWM timer (TIM8), encoder timer (TIM4), current sampling, FET thermistor and thread. Dual-motor boards are not supported.

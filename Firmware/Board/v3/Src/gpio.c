@@ -110,16 +110,17 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(nFAULT_GPIO_Port, &GPIO_InitStruct);
 
-  /* The second motor's pins on dual-motor ODrive v3 boards: gate drive (TIM8),
-     gate driver chip select and encoder index. The Mini leaves them unconnected,
-     and analog mode keeps them from floating as digital inputs. */
+  /* The second motor's gate drive (TIM8) and gate driver chip select on
+     dual-motor ODrive v3 boards. The Mini leaves them unconnected, and analog
+     mode keeps them from floating as digital inputs. (Its encoder pins are
+     GPIO12 to GPIO14, configured by their GPIO modes.) */
   GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Pin = M1_AL_Pin;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
   GPIO_InitStruct.Pin = M1_BL_Pin|M1_CL_Pin;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
-  GPIO_InitStruct.Pin = M1_AH_Pin|M1_BH_Pin|M1_CH_Pin|M1_nCS_Pin|M1_ENC_Z_Pin;
+  GPIO_InitStruct.Pin = M1_AH_Pin|M1_BH_Pin|M1_CH_Pin|M1_nCS_Pin;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
 }

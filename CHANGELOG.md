@@ -123,7 +123,7 @@ Command ID | Rate Variable | Message Name
 * `sc` command to ascii protocol to run `odrv.clear_errors()`
 * Added phase balance check to motor calibration and MOTOR_ERROR_UNBALANCED_PHASES to error enums
 * Added polarity and phase offset calibration for hall effect encoders
-* [Mechanical brake support](docs/mechanical-brakes.md)
+* Mechanical brake support
 * Added periodic sending of encoder position on CAN
 * Support for UART1 on GPIO3 and GPIO4. UART0 (on GPIO1/2) and UART1 can currently not be enabled at the same time.
 * Thermistors now have a 2nd order lowpass filter applied to reduce noise
@@ -206,7 +206,7 @@ Command ID | Rate Variable | Message Name
 ### Added
 * Added motor `torque_constant`: units of torque are now [Nm] instead of just motor current.
 * Added `motor.config.torque_lim`: limit for motor torque in [Nm].
-* [Motor thermistors support](docs/thermistors.md)
+* [Motor thermistors support](https://docs.odriverobotics.com/v/0.5.6/thermistors.html)
 * Enable/disable of thermistor thermal limits according `setting axis.<thermistor>.enabled`.
 * Introduced `odrive-interface.yaml` as a root source for the ODrive's API. `odrivetool` connects much faster as a side effect.
 * Added torque_constant and torque_lim to motor config
@@ -239,8 +239,8 @@ Command ID | Rate Variable | Message Name
       * 2nd Order Position Filter
       * Trapezoidal Trajectory Planner
     * Removed `set_xxx_setpoint()` functions and made `xxx_setpoint` variables read-only
-* [Preliminary support for Absolute Encoders](docs/encoders.md)
-* [Preliminary support for endstops and homing](docs/endstops.md)
+* [Preliminary support for Absolute Encoders](https://docs.odriverobotics.com/v/0.5.6/encoders.html)
+* [Preliminary support for endstops and homing](https://docs.odriverobotics.com/v/0.5.6/endstops.html)
 * [CAN Communication with CANSimple stack](can-protocol.md)
 * Gain scheduling for anti-hunt when close to 0 position error
 * Velocity Limiting in Current Control mode according to `vel_limit` and `vel_gain`

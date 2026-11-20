@@ -75,8 +75,17 @@ void Stm32SpiArbiter::transfer_async(SpiTask* task) {
     // If the list was empty before, kick off the SPI arbiter now
     if (ptr == &task_list_) {
         if (!start()) {
+            // Unlink the failed task before reporting it (see on_complete()); tasks queued
+            // behind it in the meantime are started next.
+            SpiTask* next = nullptr;
+            CRITICAL_SECTION() {
+                next = task_list_ = task->next;
+            }
             if (task->on_complete) {
                 (*task->on_complete)(task->on_complete_ctx, false);
+            }
+            if (next) {
+                start();
             }
         }
     }
@@ -112,17 +121,26 @@ void Stm32SpiArbiter::on_complete() {
         return; // this should not happen
     }
 
-    // Wrap up transfer
-    task_list_->ncs_gpio.write(true);
-    if (task_list_->on_complete) {
-        (*task_list_->on_complete)(task_list_->on_complete_ctx, true);
-    }
-
-    // Start next task if any
+    // Unlink the finished task before its callback runs. The callback may release the task
+    // (Encoder::abs_spi_cb does), and the control-loop interrupt can preempt this handler and
+    // re-queue it at once; while still linked, transfer_async() would append it behind
+    // itself (next == itself) and the next caller walking the list would spin forever with
+    // interrupts disabled.
+    SpiTask* task = nullptr;
     SpiTask* next = nullptr;
     CRITICAL_SECTION() {
-        next = task_list_ = task_list_->next;
+        task = task_list_;
+        next = task_list_ = task->next;
     }
+
+    // Wrap up transfer
+    task->ncs_gpio.write(true);
+    if (task->on_complete) {
+        (*task->on_complete)(task->on_complete_ctx, true);
+    }
+
+    // Start the next task if one was queued behind the finished one. A task appended after
+    // the unlink to an empty list has started itself in transfer_async().
     if (next) {
         start();
     }

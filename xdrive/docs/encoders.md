@@ -62,4 +62,4 @@ The onboard encoder needs no wiring. For an external SPI encoder (the Mini's 6-p
 
 ## Other encoders
 
-The firmware keeps ODrive v0.5.6's support for incremental (ABI), hall, sin/cos and other SPI encoders (CUI AMT23 and MagAlpha MA732). None of them is tested on the Mini; ODrive's v0.5.6 documentation describes their setup.
+The firmware keeps ODrive v0.5.6's support for incremental (ABI), hall, sin/cos and other SPI encoders (CUI AMT23 and MagAlpha MA732). None of them is tested on the Mini; ODrive's [v0.5.6 encoder page](https://docs.odriverobotics.com/v/0.5.6/encoders.html) describes their setup, and [Hardware](hardware.md#gpios) lists the Mini's encoder pins.

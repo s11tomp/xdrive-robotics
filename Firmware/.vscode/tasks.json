@@ -1,12 +1,12 @@
 {
-    // See https://go.microsoft.com/fwlink/?LinkId=733558
-    // for the documentation about the tasks.json format
+    // Build tasks for VS Code (xdrive/docs/ide.md). Flashing is deliberately not a task: use
+    // xdrive/tools/usb_flash.py or swd_flash.py, which back up the flash and check the write.
     "version": "2.0.0",
     "tasks": [
         {
             "label": "build",
             "type": "shell",
-            "command": "make",
+            "command": "make -C ../xdrive -j8",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -14,26 +14,15 @@
             "presentation": {
                 "panel": "new"
             },
-            "problemMatcher": [
-                "$gcc"
-            ]
+            "problemMatcher": {
+                "base": "$gcc",
+                "fileLocation": ["relative", "${workspaceFolder}"]
+            }
         },
         {
-            "label": "flash - ST-Link",
+            "label": "clean",
             "type": "shell",
-            "command": "make flash",
-            "problemMatcher": []
-        },
-        {
-            "label": "flash - Black Magic Probe",
-            "type": "shell",
-            "command": "make flashbmp",
-            "problemMatcher": []
-        },
-        {
-            "label": "openocd",
-            "type": "shell",
-            "command": "openocd -f \"interface/stlink-v2.cfg\" -f \"target/stm32f4x_stlink.cfg\" -c \"gdb_port 3333; log_output openocd.log\"",
+            "command": "make -C ../xdrive clean",
             "problemMatcher": []
         }
     ]

@@ -33,7 +33,28 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 
 `git diff upstream/fw-v0.5.6 main -- Firmware` shows every firmware change. Developer notes (branches, toolchain, the build without tup, the byte-identical rebuild of Makerbase's firmware) are in `xdrive/README.md`. Facts about the board (pinouts, CAN wiring, bootloader, quirks) are in `xdrive/docs/board-findings.md`.
 
+## Documentation
+
+| Page | Contents |
+|---|---|
+| [Getting started](xdrive/docs/getting-started.md) | Wiring, flashing, configuring and calibrating a Mini, first moves |
+| [Migrating from Makerbase's firmware](xdrive/docs/migrating-from-stock.md) | What changes from the stock v0.5.1, and carrying settings over |
+| [Control](xdrive/docs/control.md) | Control modes, input modes, impedance control, tuning |
+| [CAN](xdrive/docs/can.md) | Wiring and termination, the message table, the impedance command |
+| [Safety and regen](xdrive/docs/safety-and-regen.md) | Faults, the watchdog hold, braking energy, ground loops |
+| [Encoders](xdrive/docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
+| [Hardware](xdrive/docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |
+| [Capture](xdrive/docs/capture.md) | Recording properties at 8 kHz |
+| [Testing](xdrive/docs/testing.md) | Host tests, the bench suite, validating a board or motor |
+| [Troubleshooting](xdrive/docs/troubleshooting.md) | Common errors on the Mini, connection problems, symptoms |
+| [Property reference](xdrive/docs/reference.md) | Every property, function, enum and error bit (generated) |
+| [Inherited features](xdrive/docs/inherited-features.md) | ODrive v0.5.6 features untested on the Mini, with links |
+| [Building and debugging in VS Code](xdrive/docs/ide.md) | Build task, attaching a debugger over SWD |
+
 ## Quick start
+
+A longer walk-through, with wiring figures and the settings to change for another motor, is in [Getting started](xdrive/docs/getting-started.md).
+
 
 All commands run from the repository root. The tools write logs to `logs/` and flash backups to `backups/` under the working directory.
 

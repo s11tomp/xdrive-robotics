@@ -32,6 +32,9 @@ make -C xdrive clean
 - **Why not tup:** ODrive builds with tup, which needs FUSE, and macOS doesn't have it. `sources.mk` transcribes the v3.6-56V board configuration from `Firmware/Tupfile.lua`: sources, include order and package flags. `firmware.mk` adds Tupfile.lua's global flags.
 - **Adding a source file:** add it to the right list in `sources.mk`.
 - **Version:** `tools/odrive/version.py` takes it from `git describe --match=*fw*` (see Versioning in the top-level README).
+- **Property reference:** `make -C xdrive reference` regenerates `xdrive/docs/reference.md` from `Firmware/odrive-interface.yaml` (`xdrive/tools/gen_reference.py`); CI fails when the committed file is stale, so regenerate it with every interface change.
+- **Doc figures:** the diagrams in `xdrive/docs/figures/` are hand-written SVG; `python xdrive/docs/figures/plots.py` redraws the plots (its docstring lists which logs each needs).
+- **VS Code:** `Firmware/.vscode/` has the build task and attach-only debug configurations (`xdrive/docs/ide.md`).
 
 ## At tag `xdrive/v0.5.1`: byte-identical to Makerbase's firmware
 These instructions apply to a checkout of the tag (its `firmware.mk` has `MAKERBASE_VERSION`/`LIB_OVERRIDE`).

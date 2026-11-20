@@ -45,6 +45,12 @@ public:
 
         float I_bus_hard_min = -INFINITY;
         float I_bus_hard_max = INFINITY;
+        // XDRIVE: bus current soft limits [A] (see Motor::update). Off (infinite) by default.
+        float I_bus_soft_min = -INFINITY;
+        float I_bus_soft_max = INFINITY;
+        // XDRIVE: flux braking. Above the start voltage [V], Id = -gain [A/V] * (vbus - start). Off (infinite) by default.
+        float flux_brake_start_voltage = INFINITY;
+        float flux_brake_gain = 5.0f;
         float I_leak_max = 0.1f;
 
         float dc_calib_tau = 0.2f;
@@ -133,6 +139,9 @@ public:
     Iph_ABC_t DC_calib_ = {0.0f, 0.0f, 0.0f};
     float dc_calib_running_since_ = 0.0f; // current sensor calibration needs some time to settle
     float I_bus_ = 0.0f; // this motors contribution to the bus current
+    // XDRIVE: torque range [Nm, axis frame] the bus current soft limits allowed last period.
+    float bus_torque_min_ = -INFINITY;
+    float bus_torque_max_ = INFINITY;
     float phase_current_rev_gain_ = 0.0f; // Reverse gain for ADC to Amps (to be set by DRV8301_setup)
     FieldOrientedController current_control_;
     float effective_current_lim_ = 10.0f; // [A]

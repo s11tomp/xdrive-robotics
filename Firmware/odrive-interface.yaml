@@ -951,6 +951,34 @@ interfaces:
               below this value the motor gets disarmed immediately. Usually this
               is set in conjunction with `I_bus_hard_min`. Set to inf to disable.
               Take noise into account when chosing a value.
+          I_bus_soft_min:
+            type: float32
+            unit: A
+            doc: |
+              XDRIVE: lowest bus current (most regen) the motor aims for. Each control period the
+              torque current is clamped so that the predicted bus current,
+              1.5 * (R * (Id^2 + Iq^2) + back-EMF * Iq) / vbus, stays at or above this value.
+              Values above 0 count as 0. Braking at speed is limited to what copper losses
+              (including flux braking) and this regen allowance absorb. -inf (default) disables it.
+          I_bus_soft_max:
+            type: float32
+            unit: A
+            doc: |
+              XDRIVE: highest bus current the motor aims for, by the same prediction as
+              `I_bus_soft_min`; caps this board's draw from a shared supply. Values below 0 count
+              as 0. inf (default) disables it.
+          flux_brake_start_voltage:
+            type: float32
+            unit: V
+            doc: |
+              XDRIVE: flux braking. Above this bus voltage the motor adds d-axis current
+              Id = -flux_brake_gain * (vbus - start), up to the current limit, to burn bus energy in
+              the windings (1.5 * R * Id^2). Set it a little above the supply voltage and below
+              `dc_bus_overvoltage_trip_level`. inf (default) disables it.
+          flux_brake_gain:
+            type: float32
+            unit: A/V
+            doc: "XDRIVE: flux-braking d-axis current per volt above `flux_brake_start_voltage`."
           I_leak_max:
             type: float32
             unit: A

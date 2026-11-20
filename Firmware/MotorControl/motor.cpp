@@ -3,6 +3,7 @@
 #include "axis.hpp"
 #include "low_level.h"
 #include "odrive_main.h"
+#include "bus_limit.hpp"
 
 #include <algorithm>
 
@@ -531,6 +532,15 @@ void Motor::update(uint32_t timestamp) {
         float gain = abs_iq > id ? config_.acim_autoflux_attack_gain : config_.acim_autoflux_decay_gain;
         id += gain * (abs_iq - id) * current_meas_period;
         id = std::clamp(id, config_.acim_autoflux_min_Id, 0.9f * ilim); // 10% space reserved for Iq
+    } else if (config_.motor_type == MOTOR_TYPE_HIGH_CURRENT) {
+        // XDRIVE: flux braking. Above flux_brake_start_voltage the d-axis current turns bus energy
+        // into copper loss (1.5 * R * Id^2), for supplies that can't sink regen current. Negative Id,
+        // so the motor needs less voltage, not more. Nothing else sets Id for this motor type.
+        float flux_brake = 0.0f;
+        if (vbus_voltage > config_.flux_brake_start_voltage) {
+            flux_brake = config_.flux_brake_gain * (vbus_voltage - config_.flux_brake_start_voltage);
+        }
+        id = -std::clamp(flux_brake, 0.0f, ilim * 0.99f); // 1% space reserved for Iq to avoid numerical issues
     } else {
         id = std::clamp(id, -ilim*0.99f, ilim*0.99f); // 1% space reserved for Iq to avoid numerical issues
     }
@@ -547,6 +557,30 @@ void Motor::update(uint32_t timestamp) {
     float Iq_lim = (iq_lim_sqr <= 0.0f) ? 0.0f : sqrt(iq_lim_sqr);
     iq = std::clamp(iq, -Iq_lim, Iq_lim);
 
+    std::optional<float> phase_vel = phase_vel_src_.present();
+
+    // XDRIVE: bus current soft limits (bus_limit.hpp): braking burns regen beyond I_bus_soft_min
+    // with extra d-axis current before it gives up torque. The torque bounds (axis frame) let the
+    // controller clamp and stop integrating next period.
+    bus_torque_min_ = -INFINITY;
+    bus_torque_max_ = INFINITY;
+    if (config_.motor_type == MOTOR_TYPE_HIGH_CURRENT
+        && (std::isfinite(config_.I_bus_soft_min) || std::isfinite(config_.I_bus_soft_max))) {
+        if (!phase_vel.has_value()) {
+            error_ |= ERROR_UNKNOWN_PHASE_VEL;
+            return;
+        }
+        const float back_emf = *phase_vel * (2.0f/3.0f) * (config_.torque_constant / config_.pole_pairs);
+        const bus_limit::Output o = bus_limit::apply(iq, id, ilim, config_.phase_resistance, back_emf, vbus_voltage,
+                                                     config_.I_bus_soft_min, config_.I_bus_soft_max);
+        id = o.id;
+        iq = o.iq;
+        const float t1 = direction_ * config_.torque_constant * o.iq_min;
+        const float t2 = direction_ * config_.torque_constant * o.iq_max;
+        bus_torque_min_ = std::min(t1, t2);
+        bus_torque_max_ = std::max(t1, t2);
+    }
+
     if (axis_->motor_.config_.motor_type != Motor::MOTOR_TYPE_GIMBAL) {
         Idq_setpoint_ = {id, iq};
     }
@@ -561,8 +595,6 @@ void Motor::update(uint32_t timestamp) {
 
     float vd = 0.0f;
     float vq = 0.0f;
-
-    std::optional<float> phase_vel = phase_vel_src_.present();
 
     if (config_.R_wL_FF_enable) {
         if (!phase_vel.has_value()) {

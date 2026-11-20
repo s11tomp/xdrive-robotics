@@ -501,15 +501,18 @@ bool Controller::update() {
         torque = limitVel(config_.vel_limit, *vel_estimate, vel_gain, torque);
     }
 
-    // Torque limiting
+    // Torque limiting. XDRIVE: includes the motor's bus current soft limits from the previous period
+    // (Motor::update), so the velocity integrator stops winding up while they clamp the torque.
     bool limited = false;
-    if (torque > Tlim) {
+    const float torque_max = std::min(Tlim, axis_->motor_.bus_torque_max_);
+    const float torque_min = std::max(-Tlim, axis_->motor_.bus_torque_min_);
+    if (torque > torque_max) {
         limited = true;
-        torque = Tlim;
+        torque = torque_max;
     }
-    if (torque < -Tlim) {
+    if (torque < torque_min) {
         limited = true;
-        torque = -Tlim;
+        torque = torque_min;
     }
 
     // Velocity integrator (behaviour dependent on limiting)

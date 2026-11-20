@@ -13,8 +13,14 @@ reference material.
   - Tag `xdrive/v0.5.1` is the last v0.5.1-based state. It holds the byte-identical build described below.
 - **Mini changes on v0.5.6:**
   - **Second DRV8301 marked not populated** (`-DXDRIVE_MINI`, `board.cpp`). v0.5.6 retries every idle motor's gate-driver setup every millisecond. For the missing second driver, that meant endless SPI traffic on the bus the encoder shares. This is the likely reason stock v0.5.6 "doesn't drive the Mini".
-  - **The AS5047U parity check stays disabled**, as Makerbase had it.
+  - **AS5047 frame checks are configurable** (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`) with counters. The test-stand board's chip sends even parity in bit 15 (an AS5047P in practice), so its check is on.
   - **Makerbase's two other encoder patches were dropped:** v0.5.6 already makes a pre-calibrated SPI absolute encoder ready on its first valid read.
+- **Features added on `main`**:
+  - Encoder integrity: SPI frame diagnostics and impossible-jump rejection.
+  - Encoder correction table (`AXIS_STATE_ENCODER_CORRECTION_CALIBRATION`, 256 bins, harmonics 1..12).
+  - Watchdog `DECEL_HOLD` (`axis.config.watchdog_action`, `watchdog_decel`, `watchdog_torque_lim`; status in `controller.timeout_active`). Feed the watchdog, then `clear_errors()` to resume.
+  - Soft position limits (`controller.config.pos_min`/`pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). All off (infinite) by default.
+  - Closed-loop entry starts from rest (zero velocity/torque setpoints, no running trajectory).
 
 ## Toolchain
 `main` (v0.5.6) builds with GNU Arm Embedded **10.3-2021.10** (GCC 10.3.1), the version v0.5.6's CI

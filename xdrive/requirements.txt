@@ -1,5 +1,0 @@
-# Code generators for Firmware/autogen (fibre interface headers). These versions produce output
-# identical to the autogen files in Makerbase's 20250326 archive (verified 2026-11-18).
-jinja2==3.1.6
-PyYAML==6.0.3
-jsonschema==4.26.0

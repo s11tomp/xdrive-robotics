@@ -4,7 +4,7 @@ Firmware for the **MKS XDRIVE Mini** (an ODrive v3.6 clone) for robotics, based 
 
 This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerbase.
 
-> **Warning:** this firmware drives 60 V hardware, high-torque motors and brake resistors. A wrong setting can spin a motor at full speed, overheat it or pump the supply voltage up. Start with low `current_lim` and `vel_limit`, keep an idle command ready (`python xdrive/tools/idle.py`), and keep hands clear of anything attached to the motor. The software is provided as-is, without warranty (see `LICENSE.md`).
+> **Warning:** this firmware drives 60 V hardware, high-torque motors and brake resistors. A wrong setting can spin a motor at full speed, overheat it or pump the supply voltage up. Start with low `current_lim` and `vel_limit`, keep an idle command ready (`python tools/idle.py`), and keep hands clear of anything attached to the motor. The software is provided as-is, without warranty (see `LICENSE.md`).
 
 ## Tested hardware
 
@@ -27,67 +27,76 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
   - following-error faults (`max_pos_error`, `max_vel_error`), which zero the torque.
 - **Closed-loop entry starts from rest:** zero velocity and torque setpoints, no running trajectory.
 - **Impedance control** (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4): torque = `input_kp` x position error + `input_kd` x velocity error + `input_torque`, with no integrator.
-- **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `Firmware/communication/can/impedance_frame.hpp`; host codec: `xdrive/tools/impedance_frame.py`.
+- **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `src/communication/can/impedance_frame.hpp`; host codec: `tools/impedance_frame.py`.
 - **Regen limits**, off by default: flux braking above a bus voltage (`motor.config.flux_brake_start_voltage`), and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`) that burn regen in the windings before cutting braking torque.
 - **High-rate capture** (`odrv.capture`): up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer, with a level, manual or immediate trigger, read back in about 0.2 s.
 
-`git diff upstream/fw-v0.5.6 main -- Firmware` shows every firmware change. Developer notes (branches, toolchain, the build without tup, the byte-identical rebuild of Makerbase's firmware) are in `xdrive/README.md`. Facts about the board (pinouts, CAN wiring, bootloader, quirks) are in `xdrive/docs/board-findings.md`.
+`git diff -M upstream/fw-v0.5.6 main -- Firmware src` shows every firmware change (upstream's `Firmware/` is `src/` here). Developer notes (repository layout, toolchain, build, tests, debugging, the byte-identical rebuild of Makerbase's firmware) are in `docs/development.md`. Facts about the board (pinouts, CAN wiring, bootloader, quirks) are in `docs/board-findings.md`.
 
 ## Documentation
 
 | Page | Contents |
 |---|---|
-| [Getting started](xdrive/docs/getting-started.md) | Wiring, flashing, configuring and calibrating a Mini, first moves |
-| [Migrating from Makerbase's firmware](xdrive/docs/migrating-from-stock.md) | What changes from the stock v0.5.1, and carrying settings over |
-| [Control](xdrive/docs/control.md) | Control modes, input modes, impedance control, tuning |
-| [CAN](xdrive/docs/can.md) | Wiring and termination, the message table, the impedance command |
-| [Safety and regen](xdrive/docs/safety-and-regen.md) | Faults, the watchdog hold, braking energy, ground loops |
-| [Encoders](xdrive/docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
-| [Hardware](xdrive/docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |
-| [Capture](xdrive/docs/capture.md) | Recording properties at 8 kHz |
-| [Testing](xdrive/docs/testing.md) | Host tests, the bench suite, validating a board or motor |
-| [Troubleshooting](xdrive/docs/troubleshooting.md) | Common errors on the Mini, connection problems, symptoms |
-| [Property reference](xdrive/docs/reference.md) | Every property, function, enum and error bit (generated) |
-| [Inherited features](xdrive/docs/inherited-features.md) | ODrive v0.5.6 features untested on the Mini, with links |
-| [Building and debugging in VS Code](xdrive/docs/ide.md) | Build task, attaching a debugger over SWD |
+| [Getting started](docs/getting-started.md) | Wiring, flashing, configuring and calibrating a Mini, first moves |
+| [Migrating from Makerbase's firmware](docs/migrating-from-stock.md) | What changes from the stock v0.5.1, and carrying settings over |
+| [Control](docs/control.md) | Control modes, input modes, impedance control, tuning |
+| [CAN](docs/can.md) | Wiring and termination, the message table, the impedance command |
+| [Safety and regen](docs/safety-and-regen.md) | Faults, the watchdog hold, braking energy, ground loops |
+| [Encoders](docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
+| [Hardware](docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |
+| [Capture](docs/capture.md) | Recording properties at 8 kHz |
+| [Testing](docs/testing.md) | Host tests, the bench suite, validating a board or motor |
+| [Troubleshooting](docs/troubleshooting.md) | Common errors on the Mini, connection problems, symptoms |
+| [Property reference](docs/reference.md) | Every property, function, enum and error bit (generated) |
+| [Inherited features](docs/inherited-features.md) | ODrive v0.5.6 features untested on the Mini, with links |
+| [Development](docs/development.md) | Repository layout, toolchain, build, tests, debugging over SWD, releases |
+
+## Repository layout
+
+| Path | Contents |
+|---|---|
+| `src/` | The firmware: ODrive v0.5.6's firmware tree with this firmware's changes, the vendored libraries (`ThirdParty/`, `fibre-cpp/`), the interface definition (`odrive-interface.yaml`) and unit tests (`tests/`) |
+| `tools/` | Host tools, their tests (`tests/`), and the code generators (`codegen/`, `gen_reference.py`, `gen_dbc.py`, `version.py`) |
+| `docs/` | Documentation and figures, the generated property reference and the CAN database (`cansimple.dbc`) |
+| `examples/` | Example settings for a DJI 10018 and a CAN example |
+| `build/` | Build output: firmware images, generated headers, unit-test binary (not committed) |
 
 ## Quick start
 
-A longer walk-through, with wiring figures and the settings to change for another motor, is in [Getting started](xdrive/docs/getting-started.md).
-
+A longer walk-through, with wiring figures and the settings to change for another motor, is in [Getting started](docs/getting-started.md).
 
 All commands run from the repository root. The tools write logs to `logs/` and flash backups to `backups/` under the working directory.
 
 **Build**
-1. Install GNU Arm Embedded 10.3-2021.10 and `uv` (details: `xdrive/README.md`).
-2. `make -C xdrive -j8` (output: `Firmware/build/ODriveFirmware.{elf,hex,bin}`).
+1. Install GNU Arm Embedded 10.3-2021.10 and `uv` (details: `docs/development.md`).
+2. `make -j8` (output: `build/firmware.{elf,hex,bin}`; also creates `.venv`).
 
 **Host tools**
-1. `python3.11 -m venv .venv`
-2. `.venv/bin/pip install -r xdrive/tools/requirements.txt` (pyusb also needs libusb; on macOS: `brew install libusb`).
-3. `source .venv/bin/activate`
+1. `make venv` (creates `.venv` from `requirements.txt` with `uv`, without the Arm toolchain; pyusb also needs libusb, on macOS: `brew install libusb`).
+2. `source .venv/bin/activate`
 
 **Flash over USB** (Motor moves: every run, dry run included, ends with a reboot, and the startup sequence runs)
-1. `python xdrive/tools/usb_flash.py --elf Firmware/build/ODriveFirmware.elf` (dry run: enters the STM32's DFU bootloader, backs up the whole flash, compares, reboots).
-2. `python xdrive/tools/usb_flash.py --elf Firmware/build/ODriveFirmware.elf --write`
+1. `python tools/usb_flash.py --elf build/firmware.elf` (dry run: enters the STM32's DFU bootloader, backs up the whole flash, compares, reboots).
+2. `python tools/usb_flash.py --elf build/firmware.elf --write`
 - The first backup under `backups/` is the only way back to the board's original firmware, so keep it. Restore with `--bin backups/<dir>/flash.bin --write`.
 - The tool enters the bootloader through the running firmware's `enter_dfu_mode()` (tested from this firmware; not yet from Makerbase's). A board already in the bootloader also works.
-- `xdrive/tools/swd_flash.py` flashes the same way over SWD (ST-Link and OpenOCD).
+- `tools/swd_flash.py` flashes the same way over SWD (ST-Link and OpenOCD).
 - Flashing from Makerbase's firmware, or across a major version, resets the board's config.
 
 **Configure a DJI 10018** (for other motors, start from the example and change the motor values)
-1. Read the comment at the top of `xdrive/examples/dji-10018.json`, and change the supply, brake resistor and encoder parity settings to match your setup.
-2. `python xdrive/tools/set_config.py --file xdrive/examples/dji-10018.json`
-3. `python xdrive/tools/set_config.py --save axis0.config.startup_encoder_offset_calibration=false` (the board saves and reboots, which applies the SPI encoder mode).
-4. Motor moves: `python xdrive/tools/calibrate.py --motor --offset --correction`
-5. Motor moves: `python xdrive/tools/set_config.py --save axis0.encoder.config.pre_calibrated=true axis0.config.startup_closed_loop_control=true` (the board reboots into closed loop).
-6. `python xdrive/tools/dump_board.py --compare xdrive/examples/dji-10018.json` (lists any setting that differs, and the board's errors).
+1. Read the comment at the top of `examples/dji-10018.json`, and change the supply, brake resistor and encoder parity settings to match your setup.
+2. `python tools/set_config.py --file examples/dji-10018.json`
+3. `python tools/set_config.py --save axis0.config.startup_encoder_offset_calibration=false` (the board saves and reboots, which applies the SPI encoder mode).
+4. Motor moves: `python tools/calibrate.py --motor --offset --correction`
+5. Motor moves: `python tools/set_config.py --save axis0.encoder.config.pre_calibrated=true axis0.config.startup_closed_loop_control=true` (the board reboots into closed loop).
+6. `python tools/dump_board.py --compare examples/dji-10018.json` (lists any setting that differs, and the board's errors).
 
 **CAN**
-- J3 is a 2-pin GH1.25 connector: pin 1 CAN_L, pin 2 CAN_H, no ground pin. Wiring, termination and the adapter ground are in `xdrive/docs/board-findings.md`.
+- J3 is a 2-pin GH1.25 connector: pin 1 CAN_L, pin 2 CAN_H, no ground pin. Wiring, termination and the adapter ground are in `docs/board-findings.md`.
 - Set `can.config.baud_rate` (e.g. 1000000) and `axis0.config.can.node_id`, then save.
+- `docs/cansimple.dbc` describes every message for cantools, SavvyCAN and other DBC readers; `examples/can_dbc.py` drives a board with it.
 
-## Host tools (`xdrive/tools/`)
+## Host tools (`tools/`)
 
 Each tool's docstring gives its usage. "Motor moves" means the tool drives the motor or reboots the board.
 
@@ -111,7 +120,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `analyze_*.py` | Offline analysis of the logs |
 | `impedance_frame.py` | Host codec for the CAN impedance command (no I/O) |
 
-`python -m pytest -q xdrive/tools/tests` checks the host codec and the bus current limits against the firmware headers (needs `clang++`).
+`make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers) and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
 
 ## Versioning
 

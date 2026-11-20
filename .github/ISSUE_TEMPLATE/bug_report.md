@@ -14,4 +14,4 @@ about: Something on the board or in the tools doesn't work as documented
 - Supply voltage, brake resistor:
 - Host OS and Python version:
 
-**Board dump:** attach the `logs/*_dump.json` from `python xdrive/tools/dump_board.py` (it has the config, errors and versions).
+**Board dump:** attach the `logs/*_dump.json` from `python tools/dump_board.py` (it has the config, errors and versions).

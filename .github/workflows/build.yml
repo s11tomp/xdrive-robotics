@@ -1,8 +1,8 @@
 name: build
 
-# Every push and pull request builds the firmware and runs the host tests. Pushing a release tag
-# (fw-vX.Y.Z) also checks that CHANGELOG.md has a dated section for X.Y.Z and that the build reports
-# exactly X.Y.Z, then publishes a GitHub release with that section as its notes.
+# Every push and pull request builds the firmware, checks the generated files and runs the tests.
+# Pushing a release tag (fw-vX.Y.Z) also checks that CHANGELOG.md has a dated section for X.Y.Z and
+# that the build reports exactly X.Y.Z, then publishes a GitHub release with that section as its notes.
 on: [push, pull_request]
 
 jobs:
@@ -11,39 +11,39 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # tools/odrive/version.py reads the version from git describe
+          fetch-depth: 0  # tools/version.py reads the version from git describe; gen_reference.py reads the upstream tag
       - name: Check the release tag and its changelog section
         if: startsWith(github.ref, 'refs/tags/fw-v')
         run: |
           v="${GITHUB_REF_NAME#fw-v}"
           [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "release tags look like fw-v1.2.3, not $GITHUB_REF_NAME"; exit 1; }
-          python3 xdrive/tools/release_notes.py "$v" > /dev/null
+          python3 tools/release_notes.py "$v" > /dev/null
       - name: Install GNU Arm Embedded 10.3-2021.10 and uv
         run: |
           curl -sSL https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2 | tar -xj -C "$HOME"
           python3 -m pip install --user uv
       - name: Build
-        run: make -C xdrive -j4 TOOLCHAIN="$HOME/gcc-arm-none-eabi-10.3-2021.10/bin/"
-      - name: Check that xdrive/docs/reference.md matches the interface file
-        run: xdrive/.venv/bin/python xdrive/tools/gen_reference.py --check
+        run: make -j4 TOOLCHAIN="$HOME/gcc-arm-none-eabi-10.3-2021.10/bin/"
+      - name: Check that the generated files match the interface file
+        run: |
+          make generate
+          git diff --exit-code -- docs/reference.md docs/cansimple.dbc tools/enums_v056.py
       - name: Check the firmware reports the tag's version
         if: startsWith(github.ref, 'refs/tags/fw-v')
         run: |
           IFS=. read -r major minor revision <<< "${GITHUB_REF_NAME#fw-v}"
           for line in "major_ = $major;" "minor_ = $minor;" "revision_ = $revision;" "unreleased_ = 0;"; do
-            grep -qF "fw_version_$line" Firmware/autogen/version.c || { cat Firmware/autogen/version.c; exit 1; }
+            grep -qF "fw_version_$line" build/autogen/version.c || { cat build/autogen/version.c; exit 1; }
           done
-      - name: Host tests
-        run: |
-          python3 -m pip install --user numpy pytest
-          python3 -m pytest -q xdrive/tools/tests
+      - name: Tests
+        run: make test
       - uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: |
-            Firmware/build/ODriveFirmware.elf
-            Firmware/build/ODriveFirmware.bin
-            Firmware/build/ODriveFirmware.hex
+            build/firmware.elf
+            build/firmware.bin
+            build/firmware.hex
 
   release:
     if: startsWith(github.ref, 'refs/tags/fw-v')
@@ -62,9 +62,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           v="${GITHUB_REF_NAME#fw-v}"
-          python3 xdrive/tools/release_notes.py "$v" > notes.md
+          python3 tools/release_notes.py "$v" > notes.md
           cd dist
-          for ext in elf bin hex; do mv "ODriveFirmware.$ext" "xdrive-robotics-$v.$ext"; done
+          for ext in elf bin hex; do mv "firmware.$ext" "xdrive-robotics-$v.$ext"; done
           sha256sum xdrive-robotics-"$v".* > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" xdrive-robotics-"$v".* SHA256SUMS \
             --title "xdrive-robotics $v" --notes-file ../notes.md

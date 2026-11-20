@@ -195,8 +195,17 @@ interfaces:
       can: {type: Can}
       test_property: uint32
       otp_valid: readonly bool
+      adc1_scan_enabled:
+        type: readonly bool
+        doc: "XDRIVE diagnostics: whether ADC1's free-running 16-channel scan (thermistors, GPIO analog inputs) runs. See set_adc1_scan."
         
     functions:
+      set_adc1_scan:
+        in: {enable: bool}
+        doc: |
+          XDRIVE diagnostics (RAM only): stop or restart ADC1's free-running regular scan. The bus-voltage
+          sample (ADC1 injected, timer-triggered) keeps running. While stopped, thermistor and analog-input
+          readings are frozen at their last value.
       test_function: {in: {delta: int32},out: {cnt: int32}}
       get_adc_voltage: 
         in: {gpio: uint32}
@@ -847,6 +856,8 @@ interfaces:
           final_v_beta: readonly float32
       n_evt_current_measurement: {type: readonly uint32, doc: Number of current measurement events since startup (modulo 2^32)}
       n_evt_pwm_update: {type: readonly uint32, doc: Number of PWM update events since startup (modulo 2^32)}
+      spike_count: {type: readonly uint32, doc: "XDRIVE diagnostics: control periods (while armed) in which the measured current vector jumped by more than spike_threshold from the previous period. A one-period glitch counts twice (out and back)."}
+      spike_threshold: {type: float32, unit: A, doc: "XDRIVE diagnostics (RAM only): jump threshold for spike_count."}
 
       config:
         c_is_class: False
@@ -946,6 +957,19 @@ interfaces:
               Note that this feature is only works on devices with three current
               sensors (e.g. ODrive v4).
           dc_calib_tau: float32
+    functions:
+      get_spike_n:
+        in: {index: uint32}
+        out: {n: uint32}
+        doc: "XDRIVE diagnostics: odrv.n_evt_control_loop at spike event `index` (0..31, ring buffer; event k is at k % 32)."
+      get_spike_db:
+        in: {index: uint32}
+        out: {val: float32}
+        doc: "XDRIVE diagnostics: phase-B current change [A] at spike event `index`."
+      get_spike_dc:
+        in: {index: uint32}
+        out: {val: float32}
+        doc: "XDRIVE diagnostics: phase-C current change [A] at spike event `index`."
 
   ODrive.Oscilloscope:
     c_is_class: True

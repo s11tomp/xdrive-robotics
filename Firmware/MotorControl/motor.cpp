@@ -622,6 +622,28 @@ void Motor::current_meas_cb(uint32_t timestamp, std::optional<Iph_ABC_t> current
         current_meas_ = std::nullopt;
     }
 
+    // XDRIVE diagnostics: record jumps of the measured current vector between consecutive periods.
+    if (current_meas_.has_value() && is_armed_) {
+        if (spike_prev_valid_) {
+            float dB = current_meas_->phB - spike_prev_B_;
+            float dC = current_meas_->phC - spike_prev_C_;
+            float d_alpha = -(dB + dC);
+            float d_beta = one_by_sqrt3 * (dB - dC);
+            if (SQ(d_alpha) + SQ(d_beta) > SQ(spike_threshold_)) {
+                uint32_t k = spike_count_ % kSpikeLog;
+                spike_n_[k] = odrv.n_evt_control_loop_;
+                spike_dB_[k] = dB;
+                spike_dC_[k] = dC;
+                spike_count_++;
+            }
+        }
+        spike_prev_B_ = current_meas_->phB;
+        spike_prev_C_ = current_meas_->phC;
+        spike_prev_valid_ = true;
+    } else {
+        spike_prev_valid_ = false;
+    }
+
     // Run system-level checks (e.g. overvoltage/undervoltage condition)
     // The motor might be disarmed in this function. In this case the
     // handler will continue to run until the end but it won't have an

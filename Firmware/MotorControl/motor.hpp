@@ -105,6 +105,20 @@ public:
 //private:
 
     uint32_t n_evt_current_measurement_ = 0;
+
+    // XDRIVE diagnostics (RAM only): one-period jumps of the measured current vector while armed.
+    static constexpr uint32_t kSpikeLog = 32;
+    float spike_threshold_ = 0.75f;   // [A]
+    uint32_t spike_count_ = 0;
+    uint32_t spike_n_[kSpikeLog] = {};
+    float spike_dB_[kSpikeLog] = {};
+    float spike_dC_[kSpikeLog] = {};
+    bool spike_prev_valid_ = false;
+    float spike_prev_B_ = 0.0f;
+    float spike_prev_C_ = 0.0f;
+    uint32_t get_spike_n(uint32_t index) override { return spike_n_[index % kSpikeLog]; }
+    float get_spike_db(uint32_t index) override { return spike_dB_[index % kSpikeLog]; }
+    float get_spike_dc(uint32_t index) override { return spike_dC_[index % kSpikeLog]; }
     uint32_t n_evt_pwm_update_ = 0;
 
     // variables exposed on protocol

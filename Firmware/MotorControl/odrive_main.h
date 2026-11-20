@@ -177,6 +177,12 @@ public:
     bool any_error();
     void clear_errors() override;
 
+    void set_adc1_scan(bool enable) override {
+        ::set_adc1_scan(enable);
+        adc1_scan_enabled_ = enable;
+    }
+    bool adc1_scan_enabled_ = true;
+
     float get_adc_voltage(uint32_t gpio) override {
         return ::get_adc_voltage(get_gpio(gpio));
     }

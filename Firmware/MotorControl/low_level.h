@@ -51,6 +51,7 @@ void start_analog_thread();
 // ADC getters
 uint16_t channel_from_gpio(Stm32Gpio gpio);
 float get_adc_voltage(Stm32Gpio gpio);
+void set_adc1_scan(bool enable);
 float get_adc_relative_voltage(Stm32Gpio gpio);
 float get_adc_relative_voltage_ch(uint16_t channel);
 

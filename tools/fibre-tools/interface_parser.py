@@ -140,6 +140,10 @@ class Loader():
 
             cls = ns.get_type(type_name, kind=ClassInfo, construct_if_missing=True)
 
+            implements = type_data.get('implements', [])
+            for name in ([implements] if isinstance(implements, str) else implements):
+                cls.implements.append(TypeNameRef(self._registry, [(*ns_path, cls.name), *using], name))
+
             for k, attr_data in get_dict(type_data, 'attributes').items():
                 if isinstance(attr_data, str):
                     attr_data = {'type': attr_data}
@@ -166,7 +170,8 @@ class Loader():
                     type_ref,
                     attr_data.get('readonly', False),
                     attr_data.get('brief', None),
-                    attr_data.get('doc', None)
+                    attr_data.get('doc', None),
+                    attr_data.get('unit', None)
                 ))
 
             for k, func_data in get_dict(type_data, 'functions').items():

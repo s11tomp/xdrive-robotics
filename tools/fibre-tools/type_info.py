@@ -31,12 +31,13 @@ class FunctionInfo():
         self.doc = doc
 
 class AttributeInfo():
-    def __init__(self, name: str, type: TypeRef, readonly: bool, brief: str, doc: str):
+    def __init__(self, name: str, type: TypeRef, readonly: bool, brief: str, doc: str, unit: str = None):
         self.name = name
         self.type = type
         self.readonly = readonly
         self.brief = brief
         self.doc = doc
+        self.unit = unit
 
 class FlagInfo():
     def __init__(self, name, bit, brief, doc):
@@ -63,6 +64,7 @@ class ClassInfo(TypeInfo):
         self.name = name
         self.functions = functions
         self.attributes = attributes
+        self.implements = [] # TypeRefs of the classes whose attributes and functions this one also has
         self.py_ref_type = name # TODO
 
 class BitfieldInfo(TypeInfo):

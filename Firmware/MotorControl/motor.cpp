@@ -130,7 +130,7 @@ struct InductanceMeasurementControlLaw : AlphaBetaFrameController {
     float get_inductance() {
         // Note: A more correct formula would also take into account that there is a finite timestep.
         // However, the discretisation in the current control loop inverts the same discrepancy
-        float dt = (float)(last_input_timestamp_ - start_timestamp_) / (float)TIM_1_8_CLOCK_HZ; // at 216MHz this overflows after 19 seconds
+        float dt = (float)(last_input_timestamp_ - start_timestamp_) / (float)TIM_1_CLOCK_HZ; // at 216MHz this overflows after 19 seconds
         return std::abs(test_voltage_) / (deltaI_ / dt);
     }
 
@@ -631,7 +631,7 @@ void Motor::update(uint32_t timestamp) {
  */
 void Motor::current_meas_cb(uint32_t timestamp, std::optional<Iph_ABC_t> current) {
     // TODO: this is platform specific
-    //const float current_meas_period = static_cast<float>(2 * TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1)) / TIM_1_8_CLOCK_HZ;
+    //const float current_meas_period = static_cast<float>(2 * TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1)) / TIM_1_CLOCK_HZ;
     TaskTimerContext tmr{axis_->task_times_.current_sense};
 
     n_evt_current_measurement_++;
@@ -719,7 +719,7 @@ void Motor::current_meas_cb(uint32_t timestamp, std::optional<Iph_ABC_t> current
  * @brief Called when the underlying hardware timer triggers an update event.
  */
 void Motor::dc_calib_cb(uint32_t timestamp, std::optional<Iph_ABC_t> current) {
-    const float dc_calib_period = static_cast<float>(2 * TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1)) / TIM_1_8_CLOCK_HZ;
+    const float dc_calib_period = static_cast<float>(2 * TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1)) / TIM_1_CLOCK_HZ;
     TaskTimerContext tmr{axis_->task_times_.dc_calib};
 
     if (current.has_value()) {
@@ -753,9 +753,9 @@ void Motor::pwm_update_cb(uint32_t output_timestamp) {
     // Apply control law to calculate PWM duty cycles
     if (is_armed_ && control_law_status == ERROR_NONE) {
         uint16_t next_timings[] = {
-            (uint16_t)(pwm_timings[0] * (float)TIM_1_8_PERIOD_CLOCKS),
-            (uint16_t)(pwm_timings[1] * (float)TIM_1_8_PERIOD_CLOCKS),
-            (uint16_t)(pwm_timings[2] * (float)TIM_1_8_PERIOD_CLOCKS)
+            (uint16_t)(pwm_timings[0] * (float)TIM_1_PERIOD_CLOCKS),
+            (uint16_t)(pwm_timings[1] * (float)TIM_1_PERIOD_CLOCKS),
+            (uint16_t)(pwm_timings[2] * (float)TIM_1_PERIOD_CLOCKS)
         };
         apply_pwm_timings(next_timings, false);
     } else if (is_armed_) {

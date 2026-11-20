@@ -9,6 +9,7 @@ Facts about the MKS XDRIVE Mini, Makerbase's stock firmware and this firmware's 
 - **SWD header J2** (JST-GH 1.25 mm, 5-pin): 1 = 3V3, 2 = SWCLK, 3 = GND, 4 = SWDIO, 5 = NRST (verified). With the board powered, SWCLK reads about 0 V (pull-down) and SWDIO about 3.3 V (pull-up), which tells the two apart. GND, SWCLK and SWDIO suffice for reading; wire NRST to the probe's RST for connect-under-reset.
 - **CAN connector J3** (GH1.25, 2-pin): see CAN below.
 - **SPI header** (GH1.25, 6-pin: MOSI, MISO, SCK, a GPIO for chip select, 3V3, GND): a candidate for an external encoder (schematic; pinout not checked).
+- **The second motor's MCU pins are unconnected** (schematic): the M1 nets (gate drive PA7, PB0, PB1, PC6 to PC8; current sense PC2, PC3; chip select PC14; encoder index PC15; thermistor) appear only as labels at the MCU, while every M0 net also appears at the gate driver or its sensors.
 - **Buttons:** S1 is reset; S2 pulls BOOT0 to 3V3 (R30 pulls it down), so holding S2 through a reset starts the STM32's built-in bootloader even with broken firmware (schematic).
 
 ## Makerbase's stock firmware
@@ -16,7 +17,7 @@ Facts about the MKS XDRIVE Mini, Makerbase's stock firmware and this firmware's 
   1. `tup.config`: `CONFIG_BOARD_VERSION=v3.6-56V`.
   2. `main.cpp`: only `axes[0]->motor_.setup()` runs, because the second DRV8301 doesn't exist. `axis1` still exists in the interface and on CAN as a ghost.
   3. `encoder.cpp`: the AS5047 parity and error-flag checks are commented out; `check_pre_calibrated()` no longer clears `pre_calibrated`; and a `pre_calibrated` encoder of any non-incremental mode is ready at boot (upstream: hall and sincos only).
-- **Makerbase changed no pins.** Stock ODrive v0.5.6 fails on the Mini because it retries the missing second gate driver's setup every millisecond, flooding the SPI bus the encoder shares (verified in source; this firmware marks the driver as not populated).
+- **Makerbase changed no pins.** Stock ODrive v0.5.6 fails on the Mini because it retries the missing second gate driver's setup every millisecond, flooding the SPI bus the encoder shares (verified in source; this firmware has no second gate driver).
 - **More than one v0.5.1 build is in circulation.** Makerbase's 2025-03-26 release (`ODriveMINI-fw-v0.5.1-20250326`) and an earlier build share their vector table and strings, but the earlier one is 56 bytes larger around `check_pre_calibrated()` (verified). Both report fw 0.0.0, because Makerbase built outside git.
 - **The ghost `axis1`** of Makerbase's firmware reports errors of its own: on v0.5.1 it latches `CURRENT_MEASUREMENT_TIMEOUT` after a save, and on a stock v0.5.6 build it reports the missing gate driver (verified). It also sends CAN heartbeats and encoder estimates as node 1 by default, so on a shared bus its node ID must not collide with a real board's. This firmware has no `axis1`.
 - **v0.5.1 `save_configuration()` does not reboot,** and afterwards the motor gets no current until a reboot: the current loop winds up to full voltage and nothing flows (verified). Save, then reboot. `erase_configuration()` reboots. On v0.5.2 and later, including this firmware, a save reboots the board and its startup sequence runs.

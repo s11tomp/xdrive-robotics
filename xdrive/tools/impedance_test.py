@@ -2,7 +2,9 @@
 """Bench test of CONTROL_MODE_IMPEDANCE_CONTROL over USB.  *** MOTOR MOVES (about 25 s, a few turns) ***
 
 The law under test: torque = input_kp * (pos_setpoint - pos) + input_kd * (vel_setpoint - vel) + input_torque.
-  stiffness   a feed-forward torque T deflects the rotor by T / kp (kp 20 and 80 Nm/turn, T = +/-0.2 Nm)
+  stiffness   a feed-forward torque T deflects the rotor by T / kp (kp 20 and 80 Nm/turn, T = +/-0.5 Nm).
+              Cogging (about 0.09 Nm on the 10018) shifts the deflection by up to 0.09 / T of itself, so
+              T = 0.5 Nm keeps it inside the 25 % tolerance at every rotor angle.
   tracking    a 0.1 turn setpoint step settles on the target (kp 50, kd 0.5: the position-mode gains' equivalent)
   trap        a trap-traj move ends on target and the axis stays in impedance control
   damping     kp = 0, kd = 0.2, input_vel = 1 turn/s: the rotor runs near 1 turn/s with torque = kd * vel error,
@@ -54,7 +56,7 @@ def test_impedance(b):
     b.closed_loop(IMPEDANCE, PASSTHROUGH)
 
     print("stiffness")
-    for kp, torques in ((20.0, (0.2, -0.2)), (80.0, (0.2,))):
+    for kp, torques in ((20.0, (0.5, -0.5)), (80.0, (0.5,))):
         gains(b, kp, 0.3, pos=b.ax.encoder.pos_estimate)
         b.event = f"kp{kp:g}_T0"
         p0 = window(b, 1.0, 0.5, POS)

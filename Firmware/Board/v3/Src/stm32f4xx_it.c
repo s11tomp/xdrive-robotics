@@ -51,7 +51,6 @@ extern DMA_HandleTypeDef hdma_spi3_tx;
 extern DMA_HandleTypeDef hdma_spi3_rx;
 extern SPI_HandleTypeDef hspi3;
 extern TIM_HandleTypeDef htim5;
-extern TIM_HandleTypeDef htim8;
 extern DMA_HandleTypeDef hdma_uart4_rx;
 extern DMA_HandleTypeDef hdma_uart4_tx;
 extern DMA_HandleTypeDef hdma_usart2_rx;
@@ -80,8 +79,7 @@ void NMI_Handler(void)
 
 __attribute__((used)) 
 void get_regs(void** stack_ptr) {
-  TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M0 PWM
-  TIM8->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M1 PWM
+  TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable the motor PWM
 
   void* volatile r0 __attribute__((unused)) = stack_ptr[0];
   void* volatile r1 __attribute__((unused)) = stack_ptr[1];
@@ -130,8 +128,7 @@ void MemManage_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_MemoryManagement_IRQn 0 */
-    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M0 PWM
-    TIM8->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M1 PWM
+    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable the motor PWM
     /* USER CODE END W1_MemoryManagement_IRQn 0 */
   }
   /* USER CODE BEGIN MemoryManagement_IRQn 1 */
@@ -150,8 +147,7 @@ void BusFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_BusFault_IRQn 0 */
-    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M0 PWM
-    TIM8->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M1 PWM
+    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable the motor PWM
     /* USER CODE END W1_BusFault_IRQn 0 */
   }
   /* USER CODE BEGIN BusFault_IRQn 1 */
@@ -170,8 +166,7 @@ void UsageFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
-    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M0 PWM
-    TIM8->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable M1 PWM
+    TIM1->BDTR &= ~(TIM_BDTR_AOE_Msk | TIM_BDTR_MOE_Msk); // disable the motor PWM
     /* USER CODE END W1_UsageFault_IRQn 0 */
   }
   /* USER CODE BEGIN UsageFault_IRQn 1 */
@@ -368,14 +363,13 @@ void USART2_IRQHandler(void)
 }
 
 /**
-* @brief This function handles TIM8 trigger and commutation interrupts and TIM14 global interrupt.
+* @brief This function handles TIM14 global interrupt (the HAL time base).
 */
 void TIM8_TRG_COM_TIM14_IRQHandler(void)
 {
   /* USER CODE BEGIN TIM8_TRG_COM_TIM14_IRQn 0 */
   COUNT_IRQ(TIM8_TRG_COM_TIM14_IRQn);
   /* USER CODE END TIM8_TRG_COM_TIM14_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim8);
   HAL_TIM_IRQHandler(&htim14);
   /* USER CODE BEGIN TIM8_TRG_COM_TIM14_IRQn 1 */
 

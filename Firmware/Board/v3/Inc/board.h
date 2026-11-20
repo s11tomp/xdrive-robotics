@@ -68,13 +68,11 @@
 #define TIM_TIME_BASE TIM14
 
 // Run control loop at the same frequency as the current measurements.
-#define CONTROL_TIMER_PERIOD_TICKS  (2 * TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1))
+#define CONTROL_TIMER_PERIOD_TICKS  (2 * TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1))
 
-#define TIM1_INIT_COUNT (TIM_1_8_PERIOD_CLOCKS / 2 - 1 * 128) // TODO: explain why this offset
-
-// The delta from the control loop timestamp to the current sense timestamp is
-// exactly 0 for M0 and TIM1_INIT_COUNT for M1.
-#define MAX_CONTROL_LOOP_UPDATE_TO_CURRENT_UPDATE_DELTA (TIM_1_8_PERIOD_CLOCKS / 2 + 1 * 128)
+// The control loop and motor 0's current sample share a timestamp: the TIM1
+// update event at the bottom of TIM1's count.
+#define MAX_CONTROL_LOOP_UPDATE_TO_CURRENT_UPDATE_DELTA 0
 
 #ifdef __cplusplus
 #include <Drivers/DRV8301/drv8301.hpp>
@@ -110,11 +108,11 @@ extern PwmInput pwm0_input;
 #endif
 
 // Period in [s]
-#define CURRENT_MEAS_PERIOD ( (float)2*TIM_1_8_PERIOD_CLOCKS*(TIM_1_8_RCR+1) / (float)TIM_1_8_CLOCK_HZ )
+#define CURRENT_MEAS_PERIOD ( (float)2*TIM_1_PERIOD_CLOCKS*(TIM_1_RCR+1) / (float)TIM_1_CLOCK_HZ )
 static const float current_meas_period = CURRENT_MEAS_PERIOD;
 
 // Frequency in [Hz]
-#define CURRENT_MEAS_HZ ( (float)(TIM_1_8_CLOCK_HZ) / (float)(2*TIM_1_8_PERIOD_CLOCKS*(TIM_1_8_RCR+1)) )
+#define CURRENT_MEAS_HZ ( (float)(TIM_1_CLOCK_HZ) / (float)(2*TIM_1_PERIOD_CLOCKS*(TIM_1_RCR+1)) )
 static const int current_meas_hz = CURRENT_MEAS_HZ;
 
 #if HW_VERSION_VOLTAGE >= 48

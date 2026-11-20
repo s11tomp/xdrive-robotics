@@ -145,7 +145,7 @@ void start_adc_pwm() {
 
     for (Motor& motor: motors) {
         // Init PWM
-        int half_load = TIM_1_8_PERIOD_CLOCKS / 2;
+        int half_load = TIM_1_PERIOD_CLOCKS / 2;
         motor.timer_->Instance->CCR1 = half_load;
         motor.timer_->Instance->CCR2 = half_load;
         motor.timer_->Instance->CCR3 = half_load;
@@ -228,6 +228,10 @@ void start_general_purpose_adc() {
     }
 
     HAL_ADC_Start_DMA(&hadc1, reinterpret_cast<uint32_t*>(adc_measurements_), ADC_CHANNEL_COUNT);
+    // HAL_ADC_Start_DMA enables the overrun interrupt, but ADC_IRQn serves the
+    // control loop (board.cpp's ADC_IRQHandler), which doesn't handle overruns.
+    // The DMA is circular, so it keeps up with the conversions.
+    __HAL_ADC_DISABLE_IT(&hadc1, ADC_IT_OVR);
 }
 
 // @brief Returns the ADC voltage associated with the specified pin.

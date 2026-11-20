@@ -21,9 +21,11 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 ### Changed
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
+- Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
+- The second motor's pins (gate drive, gate driver chip select, encoder index) are in analog mode; the Mini leaves them unconnected.
 
 ### Removed
-- The second axis (`axis1`) and everything that served it: the second motor's gate driver, encoder timer (TIM4), current sampling, FET thermistor and thread. Dual-motor boards are not supported.
+- The second axis (`axis1`) and everything that served it: the second motor's gate driver, PWM timer (TIM8), encoder timer (TIM4), current sampling, FET thermistor and thread. Dual-motor boards are not supported.
 - `INPUT_MODE_MIRROR` (7) with `controller.config.axis_to_mirror`, `mirror_ratio` and `torque_mirror_ratio`, and `controller.config.load_encoder_axis`: both took values from the other axis. The controller always uses its own axis's encoder (or the sensorless estimator).
 - `CONTROLLER_ERROR_INVALID_MIRROR_AXIS` (0x8), `CONTROLLER_ERROR_INVALID_LOAD_ENCODER` (0x10) and `GPIO_MODE_ENC1` (12). Every other error bit, input mode and GPIO mode keeps its ODrive v0.5.6 number.
 - `get_drv_fault()` returns the one gate driver's fault word (uint32).

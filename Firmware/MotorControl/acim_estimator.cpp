@@ -14,7 +14,7 @@ void AcimEstimator::update(uint32_t timestamp)  {
 
     auto [id, iq] = *idq;
 
-    float dt = (float)(timestamp - last_timestamp_) / (float)TIM_1_8_CLOCK_HZ;
+    float dt = (float)(timestamp - last_timestamp_) / (float)TIM_1_CLOCK_HZ;
     last_timestamp_ = timestamp;
 
     if (!active_) {

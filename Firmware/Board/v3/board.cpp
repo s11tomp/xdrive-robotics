@@ -39,8 +39,8 @@ UART_HandleTypeDef* uart_c = nullptr;
 Drv8301 m0_gate_driver{
     &spi3_arbiter,
     {M0_nCS_GPIO_Port, M0_nCS_Pin}, // nCS
-    {}, // EN pin (shared between both motors, therefore we actuate it outside of the drv8301 driver)
-    {nFAULT_GPIO_Port, nFAULT_Pin} // nFAULT pin (shared between both motors)
+    {}, // EN pin (board_init() resets the gate driver through it)
+    {nFAULT_GPIO_Port, nFAULT_Pin} // nFAULT pin
 };
 
 const float fet_thermistor_poly_coeffs[] =
@@ -246,7 +246,6 @@ bool board_init() {
     MX_ADC1_Init();
     MX_ADC2_Init();
     MX_TIM1_Init();
-    MX_TIM8_Init();
     MX_TIM3_Init();
     MX_SPI3_Init();
     MX_ADC3_Init();
@@ -273,8 +272,8 @@ bool board_init() {
     HAL_NVIC_SetPriority(ControlLoop_IRQn, 5, 0);
     HAL_NVIC_EnableIRQ(ControlLoop_IRQn);
 
-    HAL_NVIC_SetPriority(TIM8_UP_TIM13_IRQn, 0, 0);
-    HAL_NVIC_EnableIRQ(TIM8_UP_TIM13_IRQn);
+    HAL_NVIC_SetPriority(ADC_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(ADC_IRQn);
 
     if (odrv.config_.enable_uart_a) {
         uart_a->Init.BaudRate = odrv.config_.uart_a_baudrate;
@@ -311,12 +310,11 @@ bool board_init() {
 
     // Ensure that debug halting of the core doesn't leave the motor PWM running
     __HAL_DBGMCU_FREEZE_TIM1();
-    __HAL_DBGMCU_FREEZE_TIM8();
     __HAL_DBGMCU_FREEZE_TIM13();
 
     Stm32Gpio drv_enable_gpio = {EN_GATE_GPIO_Port, EN_GATE_Pin};
 
-    // Reset both DRV chips. The enable pin also controls the SPI interface, not
+    // Reset the DRV chip. The enable pin also controls the SPI interface, not
     // only the driver stages.
     drv_enable_gpio.write(false);
     delay_us(40); // mimumum pull-down time for full reset: 20us
@@ -331,64 +329,44 @@ void start_timers() {
         // Temporarily disable ADC triggers so they don't trigger as a side
         // effect of starting the timers.
         hadc1.Instance->CR2 &= ~(ADC_CR2_JEXTEN);
-        hadc2.Instance->CR2 &= ~(ADC_CR2_EXTEN | ADC_CR2_JEXTEN);
-        hadc3.Instance->CR2 &= ~(ADC_CR2_EXTEN | ADC_CR2_JEXTEN);
+        hadc2.Instance->CR2 &= ~(ADC_CR2_JEXTEN);
+        hadc3.Instance->CR2 &= ~(ADC_CR2_JEXTEN);
 
-        /*
-        * Synchronize TIM1, TIM8 and TIM13 such that:
-        *  1. The triangle waveform of TIM1 leads the triangle waveform of TIM8 by a
-        *     90° phase shift.
-        *  2. Each TIM13 reload coincides with a TIM1 lower update event.
-        */
-        Stm32Timer::start_synchronously<3>(
-            {&htim1, &htim8, &htim13},
-            {TIM1_INIT_COUNT, 0, TIM1_INIT_COUNT / 2 /* TIM13 is on a clock that's only have as fast as TIM1 */}
-        );
+        // TIM1 and TIM13 start together from 0, so each TIM13 reload (every
+        // control period) coincides with a TIM1 update event at the bottom of
+        // TIM1's count, where motor 0's phase currents are sampled.
+        Stm32Timer::start_synchronously<2>({&htim1, &htim13}, {0, 0});
 
         hadc1.Instance->CR2 |= (ADC_EXTERNALTRIGINJECCONVEDGE_RISING);
-        hadc2.Instance->CR2 |= (ADC_EXTERNALTRIGCONVEDGE_RISING | ADC_EXTERNALTRIGINJECCONVEDGE_RISING);
-        hadc3.Instance->CR2 |= (ADC_EXTERNALTRIGCONVEDGE_RISING | ADC_EXTERNALTRIGINJECCONVEDGE_RISING);
+        hadc2.Instance->CR2 |= (ADC_EXTERNALTRIGINJECCONVEDGE_RISING);
+        hadc3.Instance->CR2 |= (ADC_EXTERNALTRIGINJECCONVEDGE_RISING);
 
         __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_JEOC);
         __HAL_ADC_CLEAR_FLAG(&hadc2, ADC_FLAG_JEOC);
         __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_JEOC);
         __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_EOC);
-        __HAL_ADC_CLEAR_FLAG(&hadc2, ADC_FLAG_EOC);
-        __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_EOC);
         __HAL_ADC_CLEAR_FLAG(&hadc1, ADC_FLAG_OVR);
-        __HAL_ADC_CLEAR_FLAG(&hadc2, ADC_FLAG_OVR);
-        __HAL_ADC_CLEAR_FLAG(&hadc3, ADC_FLAG_OVR);
-        
-        __HAL_TIM_CLEAR_IT(&htim8, TIM_IT_UPDATE);
-        __HAL_TIM_ENABLE_IT(&htim8, TIM_IT_UPDATE);
+
+        __HAL_ADC_ENABLE_IT(&hadc1, ADC_IT_JEOC);
     }
 }
 
-// ADC1/2/3 injected conversions (TIM1 trigger) sample the bus voltage and motor 0's phase B and C
-// currents. ADC2/3 regular conversions (TIM8 trigger) carry no data; they only mark TIM8's timing.
-static bool fetch_and_reset_adcs(std::optional<Iph_ABC_t>* current0) {
-    bool all_adcs_done = (ADC1->SR & ADC_SR_JEOC) == ADC_SR_JEOC
-        && (ADC2->SR & (ADC_SR_EOC | ADC_SR_JEOC)) == (ADC_SR_EOC | ADC_SR_JEOC)
-        && (ADC3->SR & (ADC_SR_EOC | ADC_SR_JEOC)) == (ADC_SR_EOC | ADC_SR_JEOC);
-    if (!all_adcs_done) {
-        return false;
-    }
-
+// Reads the injected conversions of the latest TIM1 update event: the bus
+// voltage (ADC1) and motor 0's phase B and C currents (ADC2, ADC3). Returns no
+// currents while the gate driver isn't ready or a reading is out of range. The
+// results stay in the data registers until the next update event, 62.5 us later.
+static std::optional<Iph_ABC_t> read_adcs() {
     vbus_sense_adc_cb(ADC1->JDR1);
 
-    if (m0_gate_driver.is_ready()) {
-        std::optional<float> phB = motors[0].phase_current_from_adcval(ADC2->JDR1);
-        std::optional<float> phC = motors[0].phase_current_from_adcval(ADC3->JDR1);
-        if (phB.has_value() && phC.has_value()) {
-            *current0 = {-*phB - *phC, *phB, *phC};
-        }
+    if (!m0_gate_driver.is_ready()) {
+        return std::nullopt;
     }
-
-    ADC1->SR = ~(ADC_SR_JEOC);
-    ADC2->SR = ~(ADC_SR_EOC | ADC_SR_JEOC | ADC_SR_OVR);
-    ADC3->SR = ~(ADC_SR_EOC | ADC_SR_JEOC | ADC_SR_OVR);
-
-    return true;
+    std::optional<float> phB = motors[0].phase_current_from_adcval(ADC2->JDR1);
+    std::optional<float> phC = motors[0].phase_current_from_adcval(ADC3->JDR1);
+    if (!phB.has_value() || !phC.has_value()) {
+        return std::nullopt;
+    }
+    return Iph_ABC_t{-*phB - *phC, *phB, *phC};
 }
 
 extern "C" {
@@ -415,16 +393,26 @@ void TIM5_IRQHandler(void) {
 volatile uint32_t timestamp_ = 0;
 volatile bool counting_down_ = false;
 
-void TIM8_UP_TIM13_IRQHandler(void) {
-    COUNT_IRQ(TIM8_UP_TIM13_IRQn);
-    
-    // Entry into this function happens at 21-23 clock cycles after the timer
-    // update event.
-    __HAL_TIM_CLEAR_IT(&htim8, TIM_IT_UPDATE);
+// Runs at every TIM1 update event, alternately at the bottom and the top of
+// TIM1's center-aligned count (every 62.5 us), once the injected conversions
+// that the event triggered are done. The interrupt comes from ADC1, the only
+// ADC that also runs regular conversions, so ADC2 and ADC3 are done by then.
+void ADC_IRQHandler(void) {
+    COUNT_IRQ(ADC_IRQn);
 
-    // If the corresponding timer is counting up, we just sampled in SVM vector 0, i.e. real current
-    // If we are counting down, we just sampled in SVM vector 7, with zero current
-    bool counting_down = TIM8->CR1 & TIM_CR1_DIR;
+    bool all_adcs_done = (ADC1->SR & ADC2->SR & ADC3->SR & ADC_SR_JEOC) != 0;
+    ADC1->SR = ~ADC_SR_JEOC;
+    ADC2->SR = ~ADC_SR_JEOC;
+    ADC3->SR = ~ADC_SR_JEOC;
+    if (!all_adcs_done) {
+        motors[0].disarm_with_error(Motor::ERROR_BAD_TIMING);
+    }
+
+    // Counting up: the event was at the bottom, where the low-side FETs
+    // conduct (SVM vector 0) and the shunts carry the phase currents.
+    // Counting down: the event was at the top, where the high-side FETs
+    // conduct (SVM vector 7) and the shunts carry no current.
+    bool counting_down = TIM1->CR1 & TIM_CR1_DIR;
 
     bool timer_update_missed = (counting_down_ == counting_down);
     if (timer_update_missed) {
@@ -433,12 +421,10 @@ void TIM8_UP_TIM13_IRQHandler(void) {
     }
     counting_down_ = counting_down;
 
-    timestamp_ += TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1);
+    timestamp_ += TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1);
 
     if (!counting_down) {
         TaskTimer::enabled = odrv.task_timers_armed_;
-        // Run sampling handlers and kick off control tasks when TIM8 is
-        // counting up.
         odrv.sampling_cb();
         NVIC->STIR = ControlLoop_IRQn;
     } else {
@@ -448,7 +434,7 @@ void TIM8_UP_TIM13_IRQHandler(void) {
         TIM1->CCR1 =
         TIM1->CCR2 =
         TIM1->CCR3 =
-            TIM_1_8_PERIOD_CLOCKS / 2;
+            TIM_1_PERIOD_CLOCKS / 2;
     }
 }
 
@@ -456,10 +442,11 @@ void ControlLoop_IRQHandler(void) {
     COUNT_IRQ(ControlLoop_IRQn);
     uint32_t timestamp = timestamp_;
 
-    // Ensure that all the ADCs are done
-    std::optional<Iph_ABC_t> current0;
+    std::optional<Iph_ABC_t> current0 = read_adcs();
 
-    if (!fetch_and_reset_adcs(&current0)) {
+    // The bottom update event pends this handler. If the top one has happened
+    // since, the readings above are not the phase currents.
+    if (counting_down_) {
         motors[0].disarm_with_error(Motor::ERROR_BAD_TIMING);
     }
 
@@ -472,28 +459,25 @@ void ControlLoop_IRQHandler(void) {
         current0 = {0.0f, 0.0f};
     }
 
-    motors[0].current_meas_cb(timestamp - TIM1_INIT_COUNT, current0);
+    motors[0].current_meas_cb(timestamp, current0);
 
     odrv.control_loop_cb(timestamp);
 
-    // By this time the ADCs for both M0 and M1 should have fired again. But
-    // let's wait for them just to be sure.
+    // Wait for the top update event's conversions: the current sense
+    // amplifiers' offsets.
     MEASURE_TIME(odrv.task_times_.dc_calib_wait) {
-        while (!(ADC2->SR & ADC_SR_EOC));
+        while (timestamp_ == timestamp);
     }
 
-    if (!fetch_and_reset_adcs(&current0)) {
-        motors[0].disarm_with_error(Motor::ERROR_BAD_TIMING);
-    }
+    current0 = read_adcs();
 
-    motors[0].dc_calib_cb(timestamp + TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1) - TIM1_INIT_COUNT, current0);
+    motors[0].dc_calib_cb(timestamp + TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1), current0);
 
-    motors[0].pwm_update_cb(timestamp + 3 * TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1) - TIM1_INIT_COUNT);
+    motors[0].pwm_update_cb(timestamp + 3 * TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1));
 
-    // If we did everything right, the TIM8 update handler should have been
-    // called exactly once between the start of this function and now.
-
-    if (timestamp_ != timestamp + TIM_1_8_PERIOD_CLOCKS * (TIM_1_8_RCR + 1)) {
+    // The new duty cycles take effect at the next bottom update event. The ADC
+    // handler must have run exactly once (at the top) since this handler began.
+    if (timestamp_ != timestamp + TIM_1_PERIOD_CLOCKS * (TIM_1_RCR + 1)) {
         motors[0].disarm_with_error(Motor::ERROR_CONTROL_DEADLINE_MISSED);
     }
 

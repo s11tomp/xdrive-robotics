@@ -61,7 +61,7 @@ ODRIVE_SRCS := \
 	MotorControl/controller.cpp \
 	MotorControl/foc.cpp \
 	MotorControl/open_loop_controller.cpp \
-	MotorControl/oscilloscope.cpp \
+	MotorControl/capture.cpp \
 	MotorControl/sensorless_estimator.cpp \
 	MotorControl/trapTraj.cpp \
 	MotorControl/pwm_input.cpp \

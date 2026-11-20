@@ -133,6 +133,7 @@ interfaces:
           control_loop_misc: TaskTimer
           control_loop_checks: TaskTimer
           dc_calib_wait: TaskTimer
+          capture_update: TaskTimer
       system_stats:
         c_is_class: False
         attributes:
@@ -191,7 +192,7 @@ interfaces:
              capability were both used as interrupt input.
              Example: `Axis:config.step_gpio_pin` of both axes were set to the same GPIO.
             
-      oscilloscope: {type: Oscilloscope}
+      capture: {type: Capture}
       can: {type: Can}
       test_property: uint32
       otp_valid: readonly bool
@@ -976,12 +977,40 @@ interfaces:
         out: {val: float32}
         doc: "XDRIVE diagnostics: phase-C current change [A] at spike event `index`."
 
-  ODrive.Oscilloscope:
+  ODrive.Capture:
     c_is_class: True
+    brief: "XDRIVE: configurable high-rate capture of up to 8 properties into RAM."
+    doc: |
+      Every `decimation` control periods (8 kHz), the control loop reads the chosen properties
+      (`add_channel`, by endpoint ID) into a 32 KiB ring buffer. After the trigger, `post_trigger`
+      more samples are recorded and the state becomes DONE. The host then reads the buffer from
+      endpoint `readout_endpoint` with a chunked offset read: n_samples frames, oldest first, each
+      n_channels little-endian 32-bit words holding the property's raw bytes zero-padded. The trigger
+      sample is frame `trigger_index`. Settings are RAM only.
     attributes:
-      size: readonly uint32
+      decimation: {type: uint32, doc: "Record one sample every `decimation` control periods."}
+      trigger_mode: CaptureTrigger
+      trigger_channel: {type: uint32, doc: "Channel (in add_channel order) watched by the RISING and FALLING triggers."}
+      trigger_level: {type: float32, doc: "Level for the RISING and FALLING triggers, in the channel's own unit."}
+      post_trigger: {type: uint32, doc: "Samples recorded after the trigger sample; start() clamps it to capacity - 1."}
+      state: readonly CaptureState
+      n_channels: readonly uint32
+      capacity: {type: readonly uint32, doc: "Frames the buffer holds: 8192 / n_channels."}
+      n_samples: {type: readonly uint32, doc: "Frames recorded (at most capacity)."}
+      trigger_index: {type: readonly uint32, doc: "Frame of the trigger sample, in readout order. Valid when DONE."}
+      readout_endpoint: readonly uint16
     functions:
-      get_val: {in: {index: uint32}, out: {val: float32}}
+      add_channel:
+        in: {endpoint_id: uint32}
+        out: {ok: bool}
+        doc: "Append a property (float32, bool, uint8, uint16, uint32 or int32) by endpoint ID. Fails while recording, for an unknown ID, a function or another type, and beyond 8 channels. Discards the recorded data."
+      clear_channels:
+        doc: "Remove all channels, stop any recording and discard the data."
+      start:
+        out: {ok: bool}
+        doc: "Discard the data and record until the trigger plus post_trigger samples. Fails with no channels, an unknown trigger_mode, or a level trigger on a missing channel."
+      trigger:
+        doc: "Trigger the armed capture now (any trigger_mode)."
   
   ODrive.AcimEstimator:
     c_is_class: True
@@ -1632,6 +1661,20 @@ valuetypes:
       Stdout: {doc: Output of printf(). Only intended for developers who modify
           ODrive firmware.}
       AsciiAndStdout: {doc: Combination of `Ascii` and `Stdout`.}
+
+  ODrive.Capture.CaptureState:
+    values:
+      IDLE: {brief: No capture recorded (or the channels changed since).}
+      ARMED: {brief: Recording and waiting for the trigger.}
+      TRIGGERED: {brief: Recording the post_trigger samples.}
+      DONE: {brief: Recording finished; the buffer can be read.}
+
+  ODrive.Capture.CaptureTrigger:
+    values:
+      IMMEDIATE: {brief: Trigger on the first sample.}
+      RISING: {brief: "Trigger when trigger_channel goes from below trigger_level to at or above it."}
+      FALLING: {brief: "Trigger when trigger_channel goes from above trigger_level to at or below it."}
+      MANUAL: {brief: Wait for trigger().}
 
   ODrive.Can.Protocol:
     flags: 

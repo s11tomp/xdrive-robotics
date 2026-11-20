@@ -23,6 +23,7 @@ reference material.
   - Closed-loop entry starts from rest (zero velocity/torque setpoints, no running trajectory).
   - Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL` = 4): torque = `controller.input_kp`·pos error + `input_kd`·vel error + `input_torque`, no integrator.
   - CAN impedance command (CANSimple ID 0x1E: position, velocity, kp, kd, torque in 8 bytes) with an immediate reply on the same ID (position, velocity, measured torque, flags, FET temperature, bus voltage). Layout: `Firmware/communication/can/impedance_frame.hpp`; full scales: `axis.config.can.impedance_*`.
+  - High-rate capture (`odrv.capture`, replacing the hard-wired oscilloscope): up to 8 properties by endpoint ID into a 32 KiB RAM buffer at the 8 kHz control rate (or decimated), with a level, manual or immediate trigger. The buffer is read in bulk from fibre endpoint 0x7F00 (`fibre::kRawEndpointBase`; `fibre-cpp/legacy_protocol.cpp` routes IDs from there up to `fibre::raw_endpoint_handler`). Host tool: `capture.py`.
 
 ## Toolchain
 `main` (v0.5.6) builds with GNU Arm Embedded **10.3-2021.10** (GCC 10.3.1), the version v0.5.6's CI

@@ -489,7 +489,11 @@ void LegacyProtocolPacketBased::on_read_finished(ReadResult result) {
 
         fibre::cbufptr_t input_buffer{rx_buf.begin(), rx_buf.end() - 2};
         fibre::bufptr_t output_buffer{tx_buf_ + 2, expected_response_length};
-        fibre::endpoint_handler(endpoint_id, &input_buffer, &output_buffer);
+        if (endpoint_id >= fibre::kRawEndpointBase) {
+            fibre::raw_endpoint_handler(endpoint_id, &input_buffer, &output_buffer);
+        } else {
+            fibre::endpoint_handler(endpoint_id, &input_buffer, &output_buffer);
+        }
 
         // Send response
         if (expect_response) {

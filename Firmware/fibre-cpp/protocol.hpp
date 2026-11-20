@@ -32,6 +32,10 @@ extern const uint16_t json_crc_;
 extern const uint32_t json_version_id_;
 bool endpoint_handler(int idx, cbufptr_t* input_buffer, bufptr_t* output_buffer);
 bool endpoint0_handler(cbufptr_t* input_buffer, bufptr_t* output_buffer);
+// XDRIVE: endpoint IDs from kRawEndpointBase up bypass the generated table. The firmware's
+// raw_endpoint_handler serves them as offset-addressed byte buffers, like endpoint 0's JSON.
+constexpr uint16_t kRawEndpointBase = 0x7f00;
+bool raw_endpoint_handler(int idx, cbufptr_t* input_buffer, bufptr_t* output_buffer);
 bool is_endpoint_ref_valid(endpoint_ref_t endpoint_ref);
 bool set_endpoint_from_float(endpoint_ref_t endpoint_ref, float value);
 }

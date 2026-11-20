@@ -398,7 +398,6 @@ void ODrive::control_loop_cb(uint32_t timestamp) {
         }
 
         uart_poll();
-        odrv.oscilloscope_.update();
     }
 
     for (auto& axis : axes) {
@@ -455,6 +454,11 @@ void ODrive::control_loop_cb(uint32_t timestamp) {
         MEASURE_TIME(axis.task_times_.current_controller_update)
             axis.motor_.current_control_.update(timestamp); // uses the output of controller_ or open_loop_contoller_ and encoder_ or sensorless_estimator_ or acim_estimator_
     }
+
+    // XDRIVE: sample after the current controllers, so a frame holds this period's measurements,
+    // setpoints and voltages.
+    MEASURE_TIME(task_times_.capture_update)
+        capture_.update();
 
     // Tell the axis threads that the control loop has finished
     for (auto& axis: axes) {

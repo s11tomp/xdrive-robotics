@@ -119,6 +119,7 @@ struct TaskTimes {
     TaskTimer control_loop_misc;
     TaskTimer control_loop_checks;
     TaskTimer dc_calib_wait;
+    TaskTimer capture_update;
 };
 
 
@@ -151,7 +152,7 @@ inline ENUMTYPE operator ~ (ENUMTYPE a) { return static_cast<ENUMTYPE>(~static_c
 #include <endstop.hpp>
 #include <mechanical_brake.hpp>
 #include <axis.hpp>
-#include <oscilloscope.hpp>
+#include <capture.hpp>
 #include <communication/communication.h>
 #include <communication/can/odrive_can.hpp>
 
@@ -229,12 +230,7 @@ public:
 
     SystemStats_t system_stats_;
 
-    // Edit these to suit your capture needs
-    Oscilloscope oscilloscope_{
-        nullptr, // trigger_src
-        0.5f, // trigger_threshold
-        nullptr // data_src TODO: change data type
-    };
+    Capture capture_;
 
     ODriveCAN can_;
 

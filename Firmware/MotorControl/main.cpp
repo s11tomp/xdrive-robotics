@@ -425,9 +425,6 @@ void ODrive::control_loop_cb(uint32_t timestamp) {
             axis.encoder_.update();
     }
 
-    // Controller of either axis might use the encoder estimate of the other
-    // axis so we process both encoders before we continue.
-
     for (auto& axis: axes) {
         MEASURE_TIME(axis.task_times_.sensorless_estimator_update)
             axis.sensorless_estimator_.update();

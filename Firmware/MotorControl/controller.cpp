@@ -352,6 +352,7 @@ bool Controller::update() {
             && (*pos_estimate_linear > config_.pos_max + config_.pos_limit_margin
                 || *pos_estimate_linear < config_.pos_min - config_.pos_limit_margin)) {
         set_error(ERROR_POS_LIMIT_VIOLATION);
+        torque_output_ = 0.0f;  // the motor would otherwise apply a stale output until the disarm
         return false;
     }
 
@@ -418,11 +419,13 @@ bool Controller::update() {
     // Following-error faults (jams, collisions, encoder slip)
     if (armed && control_mode >= CONTROL_MODE_POSITION_CONTROL && std::abs(pos_err) > config_.max_pos_error) {
         set_error(ERROR_POS_FOLLOWING_ERROR);
+        torque_output_ = 0.0f;  // the motor would otherwise apply a stale output until the disarm
         return false;
     }
     if (armed && control_mode >= CONTROL_MODE_VELOCITY_CONTROL && vel_estimate.has_value()
             && std::abs(vel_setpoint_ - *vel_estimate) > config_.max_vel_error) {
         set_error(ERROR_VEL_FOLLOWING_ERROR);
+        torque_output_ = 0.0f;  // the motor would otherwise apply a stale output until the disarm
         return false;
     }
 

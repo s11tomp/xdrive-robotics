@@ -35,7 +35,7 @@ jobs:
         run: |
           python3 -m pip install --user numpy pytest
           python3 -m pytest -q xdrive/tools/tests
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: firmware
           path: |
@@ -51,7 +51,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v5
+      - uses: actions/download-artifact@v8
         with:
           name: firmware
           path: dist

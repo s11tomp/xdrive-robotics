@@ -6,12 +6,17 @@
                              equations (Controller::update, update_filter_gains) at the 8 kHz control rate
   torque-mode-vel-limit.svg  the torque limit of torque control with enable_torque_mode_vel_limit
                              (limitVel in controller.cpp)
+  correction-table.svg       an encoder correction table, from correction_table.py --save-json (--table)
+  correction-ripple.svg      the 6 turn/s cruise of the 10-turn move of two regress.py move logs, without and
+                             with the correction table (--ripple-logs OFF ON)
 
-Usage (from the repo root):  python xdrive/docs/figures/plots.py [--move-log logs/<...>-move.csv]
-Without --move-log, trap-trajectory.svg is left as it is.
+Usage (from the repo root):
+  python xdrive/docs/figures/plots.py [--move-log L] [--table T] [--ripple-logs OFF ON]
+Figures whose inputs aren't given are left as they are.
 """
 import argparse
 import csv
+import json
 import pathlib
 
 import matplotlib
@@ -46,10 +51,7 @@ def save(fig, name):
 
 
 def trap_trajectory(log):
-    rows = []
-    with open(log) as f:
-        next(f)  # host_start line
-        rows = list(csv.DictReader(f))
+    rows = read_log(log)
     start = next(i for i, r in enumerate(rows) if r["event"] == "out +3")
     end = next(i for i, r in enumerate(rows) if r["event"] == "back -3")
     seg = rows[start:end]
@@ -68,6 +70,54 @@ def trap_trajectory(log):
     ax2.legend(frameon=False, loc="upper right")
     fig.suptitle("A 3-turn trap move: vel_limit 6 turn/s, accel and decel 5 turn/s² (DJI 10018)", fontsize=10)
     save(fig, "trap-trajectory.svg")
+
+
+def read_log(path):
+    with open(path) as f:
+        next(f)  # host_start line
+        return list(csv.DictReader(f))
+
+
+def correction_table(path):
+    d = json.load(open(path))
+    counts = d["table_counts"]
+    cpr = 16384
+    x = [i / len(counts) for i in range(len(counts))]
+    deg = [c / cpr * 360.0 for c in counts]
+    fig, ax = plt.subplots(figsize=(7, 3))
+    ax.plot(x, deg, color=BLUE, lw=1.8)
+    ax.axhline(0, color=GRAY, lw=0.6)
+    ax.set_xlabel("rotor angle [turn]")
+    ax.set_ylabel("correction [° mechanical]")
+    ax.set_title(f"Encoder correction table, DJI 10018 test stand: {len(counts)} bins, "
+                 f"{d['correction_rms_counts'] / cpr * 360:.2f}° rms, {d['correction_peak_counts'] / cpr * 360:.2f}° peak",
+                 fontsize=10)
+    save(fig, "correction-table.svg")
+
+
+def cruise(rows):
+    start = next(i for i, r in enumerate(rows) if r["event"] == "out +10")
+    end = next(i for i, r in enumerate(rows) if r["event"] == "back -10")
+    seg = [r for r in rows[start:end] if abs(float(r["axis0.controller.vel_setpoint"]) - 6.0) < 1e-3]
+    p0 = float(seg[0]["axis0.encoder.pos_estimate"])
+    pos = [float(r["axis0.encoder.pos_estimate"]) - p0 for r in seg]
+    keep = [i for i, p in enumerate(pos) if p <= 2.0]
+    return ([pos[i] for i in keep], [float(seg[i]["axis0.encoder.vel_estimate"]) for i in keep],
+            [float(seg[i]["axis0.motor.current_control.Iq_measured"]) for i in keep])
+
+
+def correction_ripple(off, on):
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(7, 4.2), sharex=True)
+    for path, color, label, lw in ((off, GRAY, "without the table", 1.0), (on, BLUE, "with the table", 1.6)):
+        pos, vel, iq = cruise(read_log(path))
+        ax1.plot(pos, vel, color=color, lw=lw, label=label)
+        ax2.plot(pos, iq, color=color, lw=lw)
+    ax1.set_ylabel("velocity [turn/s]")
+    ax1.legend(frameon=False, loc="upper right", ncol=2)
+    ax2.set_ylabel("Iq measured [A]")
+    ax2.set_xlabel("rotor travel during the cruise [turn]")
+    fig.suptitle("Cruising at 6 turn/s, DJI 10018 with an off-center magnet", fontsize=10)
+    save(fig, "correction-ripple.svg")
 
 
 def input_filter():
@@ -120,9 +170,15 @@ def torque_mode_vel_limit():
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--move-log", help="a move_test.py or regress.py move log with a 3-turn move")
+    ap.add_argument("--table", help="a correction table JSON from correction_table.py --save-json")
+    ap.add_argument("--ripple-logs", nargs=2, metavar=("OFF", "ON"), help="regress.py move logs without and with the table")
     args = ap.parse_args()
     if args.move_log:
         trap_trajectory(args.move_log)
+    if args.table:
+        correction_table(args.table)
+    if args.ripple_logs:
+        correction_ripple(*args.ripple_logs)
     input_filter()
     torque_mode_vel_limit()
 

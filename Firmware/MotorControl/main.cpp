@@ -130,7 +130,6 @@ static void config_clear_all() {
         encoders[i].config_ = {};
         axes[i].sensorless_estimator_.config_ = {};
         axes[i].controller_.config_ = {};
-        axes[i].controller_.config_.load_encoder_axis = i;
         axes[i].trap_traj_.config_ = {};
         axes[i].min_endstop_.config_ = {};
         axes[i].max_endstop_.config_ = {};
@@ -223,14 +222,8 @@ bool ODrive::any_error() {
         });
 }
 
-uint64_t ODrive::get_drv_fault() {
-#if AXIS_COUNT == 1
+uint32_t ODrive::get_drv_fault() {
     return motors[0].gate_driver_.get_error();
-#elif AXIS_COUNT == 2
-    return (uint64_t)motors[0].gate_driver_.get_error() | ((uint64_t)motors[1].gate_driver_.get_error() << 32ULL);
-#else
-    #error "not supported"
-#endif
 }
 
 void ODrive::clear_errors() {
@@ -583,7 +576,6 @@ static void rtos_main(void*) {
 
     // Start state machine threads. Each thread will go through various calibration
     // procedures and then run the actual controller loops.
-    // TODO: generalize for AXIS_COUNT != 2
     for (size_t i = 0; i < AXIS_COUNT; ++i) {
         axes[i].start_thread();
     }
@@ -790,11 +782,6 @@ extern "C" int main(void) {
                 GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
             } break;
             case ODriveIntf::GPIO_MODE_ENC0: {
-                GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-                GPIO_InitStruct.Pull = GPIO_NOPULL;
-                GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-            } break;
-            case ODriveIntf::GPIO_MODE_ENC1: {
                 GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
                 GPIO_InitStruct.Pull = GPIO_NOPULL;
                 GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

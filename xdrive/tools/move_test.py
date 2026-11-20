@@ -167,7 +167,7 @@ def main():
         v = resolve(dev, name).get_value()
         if v:
             problems.append(f"{name} = {decode_bitmask(v, prefix)}")
-    if dev.axis1.error & 0x8:
+    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) < (0, 5, 2) and dev.axis1.error & 0x8:
         problems.append("axis1 has CURRENT_MEASUREMENT_TIMEOUT: PWM/ADC timing disrupted "
                         "(fw 0.5.1 after save_configuration()); reboot first (reboot_watch.py)")
     vbus = dev.vbus_voltage

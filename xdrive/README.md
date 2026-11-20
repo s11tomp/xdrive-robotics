@@ -8,7 +8,7 @@ Everything outside `xdrive/` is ODrive's tree, with this firmware's changes in `
   - Makerbase's v0.5.1 changes are the commit after the `upstream/fw-v0.5.1` snapshot (9 lines in 3 files).
   - Tag `xdrive/v0.5.1` is the last v0.5.1-based state. It holds the byte-identical build described below.
 - **Mini changes on v0.5.6:**
-  - **Second DRV8301 marked not populated** (`-DXDRIVE_MINI`, `board.cpp`). v0.5.6 retries every idle motor's gate-driver setup every millisecond. For the missing second driver, that means endless SPI traffic on the bus the encoder shares, which is why stock v0.5.6 doesn't drive the Mini.
+  - **One axis** (`AXIS_COUNT` 1 in `Board/v3/Inc/board.h`; `axis1` removed from `odrive-interface.yaml`). Stock v0.5.6 retries every idle motor's gate-driver setup every millisecond, and for the Mini's missing second driver that means endless SPI traffic on the bus the encoder shares, which is why stock v0.5.6 doesn't drive the Mini. TIM8, the second motor's PWM timer, still runs without outputs: its update interrupt starts the control loop.
   - **AS5047 frame checks are configurable** (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`) with counters. An AS5047P sends even parity in bit 15; an AS5047U has no parity.
   - **Makerbase's two other encoder patches are not carried over:** v0.5.6 already makes a pre-calibrated SPI absolute encoder ready on its first valid read.
 - **High-rate capture internals:** the buffer is read in bulk from fibre endpoint 0x7F00 (`fibre::kRawEndpointBase`); `fibre-cpp/legacy_protocol.cpp` routes IDs from there up to `fibre::raw_endpoint_handler`.
@@ -29,7 +29,7 @@ make -C xdrive -j8          # -> Firmware/build/ODriveFirmware.{elf,hex,bin,map}
 make -C xdrive asm          # disassembly -> Firmware/build/ODriveFirmware.asm
 make -C xdrive clean
 ```
-- **Why not tup:** ODrive builds with tup, which needs FUSE, and macOS doesn't have it. `sources.mk` transcribes the v3.6-56V board configuration from `Firmware/Tupfile.lua`: sources, include order and package flags. `firmware.mk` adds Tupfile.lua's global flags and `-DXDRIVE_MINI`.
+- **Why not tup:** ODrive builds with tup, which needs FUSE, and macOS doesn't have it. `sources.mk` transcribes the v3.6-56V board configuration from `Firmware/Tupfile.lua`: sources, include order and package flags. `firmware.mk` adds Tupfile.lua's global flags.
 - **Adding a source file:** add it to the right list in `sources.mk`.
 - **Version:** `tools/odrive/version.py` takes it from `git describe --match=*fw*` (see Versioning in the top-level README).
 

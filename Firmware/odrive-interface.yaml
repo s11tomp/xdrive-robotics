@@ -244,7 +244,7 @@ interfaces:
       get_gpio_states:
         out: {status: {type: uint32}}
         doc: Returns the logic states of all GPIOs. Bit i represents the state of GPIOi.
-      get_drv_fault: {out: {drv_fault: uint64}}
+      get_drv_fault: {out: {drv_fault: uint32}}
       clear_errors:
         doc: Clear all the errors of this device including all contained submodules.
 
@@ -1096,11 +1096,8 @@ interfaces:
               smooth out `input_pos` commands to give smoother motion.
           UNSTABLE_GAIN:
             doc: "`motor.config.bandwidth` was set too high to create a stable controller."
-          INVALID_MIRROR_AXIS:
-            doc: An invalid `axis_to_mirror` was selected
-          INVALID_LOAD_ENCODER:
-            doc: An invalid `load_encoder_axis` was selected
           INVALID_ESTIMATE:
+            bit: 5
             doc: Indicates the encoder estimation module declined to output a linear position or velocity value and the exception was caught.
           INVALID_CIRCULAR_RANGE:
             doc: Indicates the encoder estimation module declined to output a circular position value and the exception was caught.
@@ -1247,19 +1244,6 @@ interfaces:
           inertia:
             type: float32
             unit: N·m/(turn/s^2)
-          axis_to_mirror: 
-            type: uint8
-            doc: The axis used for mirroring when in `INPUT_MODE_MIRROR`
-          mirror_ratio: 
-            type: float32
-            doc: The ratio applied to position and velocity movements of the mirrored axis.  To reverse movements, use a negative value
-          torque_mirror_ratio: 
-            type: float32
-            doc: The ratio applied to torque values of the mirrored axis.
-          load_encoder_axis:
-            type: uint8
-            # TODO: this is meaningless for a user. Should there be a separate developer note?
-            doc: Default depends on Axis number and is set in load_configuration()
           input_filter_bandwidth:
             type: float32
             unit: rad/s
@@ -1641,7 +1625,6 @@ interfaces:
           gpio3_pwm_mapping: {type: ODrive.Endpoint, c_name: 'pwm_mappings[2]', doc: Make sure the corresponding GPIO is in `GPIO_MODE_PWM`.}
           gpio4_pwm_mapping: {type: ODrive.Endpoint, c_name: 'pwm_mappings[3]', doc: Make sure the corresponding GPIO is in `GPIO_MODE_PWM`.}
       axis0: {type: ODrive.Axis, c_name: get_axis(0)}
-      axis1: {type: ODrive.Axis, c_name: get_axis(1)}
 
 valuetypes:
   ODrive.GpioMode:
@@ -1668,8 +1651,7 @@ valuetypes:
         is exposed, this mode is of no use on ODrive v3.x.}
       PWM: {doc: See `config.gpio1_pwm_mapping`.}
       ENC0: {doc: The pin is used by quadrature encoder 0.}
-      ENC1: {doc: The pin is used by quadrature encoder 1.}
-      ENC2: {doc: This mode is not supported on ODrive v3.x.}
+      ENC2: {value: 13, doc: This mode is not supported on ODrive v3.x.}
       MECH_BRAKE: {doc: This is to support external mechanical brakes.}
       STATUS: {doc: The pin is used for status output (see `config.error_gpio_pin`)}
 
@@ -1912,26 +1894,8 @@ valuetypes:
 
           ### Valid Control Modes:
           * `CONTROL_MODE_TORQUE_CONTROL`
-      MIRROR:
-        brief: Implements "electronic mirroring".
-        doc: |
-          This is like electronic camming, but you can only mirror exactly the
-          movements of the other motor, according to a fixed ratio.
-
-          [![](http://img.youtube.com/vi/D4_vBtyVVzM/0.jpg)](http://www.youtube.com/watch?v=D4_vBtyVVzM "Example Mirroring Video")
-
-          ### Configuration Values
-          * `config.axis_to_mirror`
-          * `config.mirror_ratio`
-
-          ### Valid Inputs
-          * None.  Inputs are taken directly from the other axis encoder estimates
-
-          ### Valid Control modes
-          * `CONTROL_MODE_POSITION_CONTROL`
-          * `CONTROL_MODE_VELOCITY_CONTROL`
-          * `CONTROL_MODE_TORQUE_CONTROL`
       TUNING:
+        value: 8
         brief: Implements a tuning mode
         doc: |
           Used for tuning your odrive, this mode allows the user to set different frequencies.

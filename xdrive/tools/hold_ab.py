@@ -73,8 +73,8 @@ def main():
     problems = []
     if not (ax.motor.is_calibrated and ax.encoder.is_ready):
         problems.append("motor/encoder not ready")
-    if dev.axis1.error & 0x8:
-        problems.append("axis1 CURRENT_MEASUREMENT_TIMEOUT: reboot first (save without reboot?)")
+    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) < (0, 5, 2) and dev.axis1.error & 0x8:
+        problems.append("axis1 CURRENT_MEASUREMENT_TIMEOUT: reboot first (fw 0.5.1 after save_configuration())")
     for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
                          ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")]:
         v = resolve(dev, name).get_value()

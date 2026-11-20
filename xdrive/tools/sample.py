@@ -56,7 +56,6 @@ ALIASES = {
     "axis0.encoder.config.offset": "axis0.encoder.config.phase_offset",
     "axis0.encoder.config.offset_float": "axis0.encoder.config.phase_offset_float",
     "axis0.config.can_node_id": "axis0.config.can.node_id",
-    "axis1.config.can_node_id": "axis1.config.can.node_id",
     "axis0.controller.config.enable_current_mode_vel_limit": "axis0.controller.config.enable_torque_mode_vel_limit",
 }
 

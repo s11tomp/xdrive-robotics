@@ -18,7 +18,6 @@ GPIO_MODE_I2C_A                          = 8
 GPIO_MODE_SPI_A                          = 9
 GPIO_MODE_PWM                            = 10
 GPIO_MODE_ENC0                           = 11
-GPIO_MODE_ENC1                           = 12
 GPIO_MODE_ENC2                           = 13
 GPIO_MODE_MECH_BRAKE                     = 14
 GPIO_MODE_STATUS                         = 15
@@ -89,7 +88,6 @@ INPUT_MODE_POS_FILTER                    = 3
 INPUT_MODE_MIX_CHANNELS                  = 4
 INPUT_MODE_TRAP_TRAJ                     = 5
 INPUT_MODE_TORQUE_RAMP                   = 6
-INPUT_MODE_MIRROR                        = 7
 INPUT_MODE_TUNING                        = 8
 
 # ODrive.Motor.MotorType
@@ -162,8 +160,6 @@ CONTROLLER_ERROR_NONE                    = 0x00000000
 CONTROLLER_ERROR_OVERSPEED               = 0x00000001
 CONTROLLER_ERROR_INVALID_INPUT_MODE      = 0x00000002
 CONTROLLER_ERROR_UNSTABLE_GAIN           = 0x00000004
-CONTROLLER_ERROR_INVALID_MIRROR_AXIS     = 0x00000008
-CONTROLLER_ERROR_INVALID_LOAD_ENCODER    = 0x00000010
 CONTROLLER_ERROR_INVALID_ESTIMATE        = 0x00000020
 CONTROLLER_ERROR_INVALID_CIRCULAR_RANGE  = 0x00000040
 CONTROLLER_ERROR_SPINOUT_DETECTED        = 0x00000080
@@ -201,7 +197,6 @@ class GpioMode(enum.Enum):
     SPI_A                                    = 9
     PWM                                      = 10
     ENC0                                     = 11
-    ENC1                                     = 12
     ENC2                                     = 13
     MECH_BRAKE                               = 14
     STATUS                                   = 15
@@ -263,7 +258,6 @@ class InputMode(enum.Enum):
     MIX_CHANNELS                             = 4
     TRAP_TRAJ                                = 5
     TORQUE_RAMP                              = 6
-    MIRROR                                   = 7
     TUNING                                   = 8
 class MotorType(enum.Enum):
     HIGH_CURRENT                             = 0
@@ -330,8 +324,6 @@ class ControllerError(enum.IntFlag):
     OVERSPEED                                = 0x00000001
     INVALID_INPUT_MODE                       = 0x00000002
     UNSTABLE_GAIN                            = 0x00000004
-    INVALID_MIRROR_AXIS                      = 0x00000008
-    INVALID_LOAD_ENCODER                     = 0x00000010
     INVALID_ESTIMATE                         = 0x00000020
     INVALID_CIRCULAR_RANGE                   = 0x00000040
     SPINOUT_DETECTED                         = 0x00000080

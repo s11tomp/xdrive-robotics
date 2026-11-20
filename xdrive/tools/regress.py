@@ -6,6 +6,9 @@ virtual-weight steps). Each test leaves the axis IDLE; the suite ends IDLE.
 
 Steps (each is an existing script, so its own logs and guards apply):
   1. dump_board.py               firmware version, config diff vs --compare, boot errors
+     With --hold-at F (or a baseline that records one), move_to.py first puts the rotor at
+     fractional turn F before steps 2 and 4: cogging makes hold noise and disturbance deflection
+     depend on where the rotor rests, so runs compare only at the same angle.
   2. hold_ab.py --hold 15        hold noise: Iq setpoint/measured, Id, velocity, position std
   3. move_test.py --moves 1,3,10 peak currents, tracking error, final error; then from its CSV:
      analyze_settle metrics (median over segments) and analyze_ripple --locked 4.5 6.5
@@ -14,7 +17,8 @@ Steps (each is an existing script, so its own logs and guards apply):
 
 Writes logs/<stamp>_<serial>_regress-<tag>.json. With --baseline FILE it prints each metric
 next to the baseline and flags anything worse by more than the tolerance. --save-baseline
-copies this run to configs/regress-baseline_<serial>.json.
+copies this run to configs/regress-baseline_<serial>.json, including its --hold-at angle, which
+later runs against that baseline then use by default.
 
 Usage (from the repo root):
   python xdrive/tools/regress.py --tag fw-0.5.1-dev --save-baseline
@@ -129,12 +133,17 @@ def main():
     ap.add_argument("--baseline", help="regress JSON to compare against")
     ap.add_argument("--save-baseline", action="store_true", help="store this run as configs/regress-baseline_<serial>.json")
     ap.add_argument("--hold", type=float, default=15.0)
+    ap.add_argument("--hold-at", type=float, help="fractional turn (0..1) to move the rotor to before the hold and "
+                                                     "disturbance tests (default: the baseline's)")
     ap.add_argument("--compare", help="settings file the board's config must match (passed to dump_board.py)")
     args = ap.parse_args()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     label = f"regress-{args.tag}-{stamp}"
     out = {"tag": args.tag, "t": datetime.datetime.now().astimezone().isoformat(), "metrics": {}, "files": {}}
     M = out["metrics"]
+    baseline_doc = json.loads(pathlib.Path(args.baseline).read_text()) if args.baseline else {}
+    hold_at = args.hold_at if args.hold_at is not None else baseline_doc.get("hold_at")
+    out["hold_at"] = hold_at
 
     # 1. Dump.
     run("dump_board.py", "--label", f"{label}-dump", *(["--compare", args.compare] if args.compare else []))
@@ -145,12 +154,13 @@ def main():
     out["fw_version"] = f"{v.get('fw_version_major')}.{v.get('fw_version_minor')}.{v.get('fw_version_revision')}" + \
                         ("-dev" if v.get("fw_version_unreleased") else "")
     out["config_diffs"] = d["diff_vs_expected"]
-    # axis1 is the Mini's ghost axis: on v0.5.6 it always reports the missing gate driver (DRV_FAULT).
     out["boot_errors"] = {k: e for k, e in d["errors_decoded"].items()
-                          if isinstance(e, dict) and e.get("flags") and not k.startswith("axis1.")}
+                          if isinstance(e, dict) and e.get("flags")}
     out["files"]["dump"] = str(dump_path.relative_to(WORKDIR))
 
     # 2. Hold noise.
+    if hold_at is not None:
+        run("move_to.py", str(hold_at))
     run("hold_ab.py", "--hold", str(args.hold), "--variant", "hold:", "--label", f"{label}-hold")
     hp = newest(f"*_{label}-hold.json")
     h = json.loads(hp.read_text())
@@ -190,6 +200,8 @@ def main():
     out["files"]["move"] = str(mp.relative_to(WORKDIR))
 
     # 4. Disturbance.
+    if hold_at is not None:
+        run("move_to.py", str(hold_at))
     run("disturb_test.py", "--torque", "0.2", "--label", f"{label}-disturb")
     dp = newest(f"*_{label}-disturb.json")
     dt = json.loads(dp.read_text())
@@ -212,7 +224,7 @@ def main():
                       ("move errors", out["move_final_errors"]), ("disturb abort", out["disturb_abort_reason"])):
         if val:
             problems.append(f"{name}: {val}")
-    base = json.loads(pathlib.Path(args.baseline).read_text())["metrics"] if args.baseline else {}
+    base = baseline_doc.get("metrics", {})
     print(f"\n=== regress {args.tag} (fw {out['fw_version']}, serial {out['serial']})" +
           (f" vs {args.baseline}" if base else ""))
     print(f"  {'metric':34s} {'this run':>10s} {'baseline':>10s}  {'change':>8s}")

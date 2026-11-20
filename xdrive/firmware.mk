@@ -20,12 +20,11 @@ ELF   := $(BUILD)/ODriveFirmware.elf
 
 include ../xdrive/sources.mk
 
-# Global CFLAGS from Tupfile.lua (non-debug build), then the package flags, then ours.
-# XDRIVE_MINI: single motor channel (the second DRV8301 isn't fitted; see board.cpp).
+# Global CFLAGS from Tupfile.lua (non-debug build), then the package flags.
 CFLAGS := '-D__weak=__attribute__((weak))' '-D__packed=__attribute__((__packed__))' -DUSE_HAL_DRIVER \
           -mthumb -mfloat-abi=hard -Wno-psabi -Wall -Wdouble-promotion -Wfloat-conversion \
           -fdata-sections -ffunction-sections -g -DFIBRE_ENABLE_SERVER -Wno-nonnull -O2 \
-          $(PKG_FLAGS) -DXDRIVE_MINI
+          $(PKG_FLAGS)
 LDFLAGS := -flto -lc -lm -lnosys -mthumb -mfloat-abi=hard -specs=nosys.specs -u _printf_float -u _scanf_float \
            -Wl,--cref -Wl,--gc-sections -Wl,--undefined=uxTopUsedPriority $(PKG_LDFLAGS)
 DEPFLAGS = -MMD -MP

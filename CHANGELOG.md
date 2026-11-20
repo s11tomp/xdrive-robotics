@@ -7,7 +7,7 @@ This file lists xdrive-robotics releases first, then upstream ODrive's own chang
 Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0.5.1 firmware resets the board's config.
 
 ### Added
-- MKS XDRIVE Mini support: the second DRV8301 is marked not populated (`-DXDRIVE_MINI`).
+- MKS XDRIVE Mini support: one axis (`axis0`), matching the Mini's single motor channel.
 - AS5047 frame checks with counters (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`; `encoder.spi_*_count`) and rejection of impossible jumps (`abs_spi_max_jump`).
 - Encoder correction table: `AXIS_STATE_ENCODER_CORRECTION_CALIBRATION` (14), 256 bins, harmonics 1 to 12 (`encoder.config.correction_enabled`, `correction_max_harmonic`).
 - Watchdog decelerate-and-hold (`axis.config.watchdog_action`, `watchdog_decel`, `watchdog_torque_lim`; `controller.timeout_active`).
@@ -21,6 +21,12 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 ### Changed
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
+
+### Removed
+- The second axis (`axis1`) and everything that served it: the second motor's gate driver, encoder timer (TIM4), current sampling, FET thermistor and thread. Dual-motor boards are not supported.
+- `INPUT_MODE_MIRROR` (7) with `controller.config.axis_to_mirror`, `mirror_ratio` and `torque_mirror_ratio`, and `controller.config.load_encoder_axis`: both took values from the other axis. The controller always uses its own axis's encoder (or the sensorless estimator).
+- `CONTROLLER_ERROR_INVALID_MIRROR_AXIS` (0x8), `CONTROLLER_ERROR_INVALID_LOAD_ENCODER` (0x10) and `GPIO_MODE_ENC1` (12). Every other error bit, input mode and GPIO mode keeps its ODrive v0.5.6 number.
+- `get_drv_fault()` returns the one gate driver's fault word (uint32).
 
 ### Fixed
 - The SPI arbiter unlinks a finished or failed task before its callback, which could otherwise freeze the board.

@@ -31,13 +31,10 @@ public:
         FaultType_GVDD_OV  = (1 << 23)  //!< DRV8301 Vdd Over Voltage fault
     } FaultType_e;
 
-    // populated = false: the chip isn't fitted (XDRIVE Mini's second motor). init() then fails
-    // immediately and nothing talks to it, so the idle loop's periodic re-init of that motor
-    // doesn't put traffic on the SPI bus shared with the encoder.
     Drv8301(Stm32SpiArbiter* spi_arbiter, Stm32Gpio ncs_gpio,
-            Stm32Gpio enable_gpio, Stm32Gpio nfault_gpio, bool populated = true)
+            Stm32Gpio enable_gpio, Stm32Gpio nfault_gpio)
             : spi_arbiter_(spi_arbiter), ncs_gpio_(ncs_gpio),
-              enable_gpio_(enable_gpio), nfault_gpio_(nfault_gpio), populated_(populated) {}
+              enable_gpio_(enable_gpio), nfault_gpio_(nfault_gpio) {}
 
     /**
      * @brief Prepares the gate driver's configuration.
@@ -128,7 +125,6 @@ private:
     Stm32Gpio ncs_gpio_;
     Stm32Gpio enable_gpio_;
     Stm32Gpio nfault_gpio_;
-    bool populated_;
 
     RegisterFile regs_; //!< Current configuration. If is_ready_ is
                         //!< true then this can be considered consistent

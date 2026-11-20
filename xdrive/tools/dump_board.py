@@ -72,7 +72,7 @@ SUMMARY = [
     "axis0.controller.config.enable_overspeed_error", "axis0.controller.config.vel_limit_tolerance",
     "axis0.controller.config.anticogging.anticogging_enabled",
     "axis0.controller.config.anticogging.pre_calibrated",
-    "axis0.config.can_node_id", "axis1.config.can_node_id", "can.config.baud_rate",
+    "axis0.config.can_node_id", "can.config.baud_rate",
     "axis0.fet_thermistor.temperature",
 ]
 

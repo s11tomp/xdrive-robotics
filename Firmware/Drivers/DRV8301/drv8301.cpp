@@ -68,10 +68,6 @@ bool Drv8301::config(float requested_gain, float* actual_gain) {
 bool Drv8301::init() {
     uint16_t val;
 
-    if (!populated_) {
-        return false;
-    }
-
     if (state_ == kStateReady) {
         return true;
     }
@@ -132,10 +128,6 @@ bool Drv8301::is_ready() {
 
 Drv8301::FaultType_e Drv8301::get_error() {
     uint16_t fault1, fault2;
-
-    if (!populated_) {
-        return FaultType_NoFault;
-    }
 
     if (!read_reg(kRegNameStatus1, &fault1) ||
         !read_reg(kRegNameStatus2, &fault2)) {

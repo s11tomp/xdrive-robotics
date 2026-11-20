@@ -120,7 +120,6 @@ void MX_FREERTOS_Init(void);
   MX_TIM1_Init();
   MX_TIM8_Init();
   MX_TIM3_Init();
-  MX_TIM4_Init();
   MX_SPI3_Init();
   MX_ADC3_Init();
   MX_TIM2_Init();

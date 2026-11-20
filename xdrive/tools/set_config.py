@@ -12,7 +12,8 @@
 - --file: a JSON file {"settings": {path: value}} (e.g. xdrive/examples/dji-10018.json),
   or a dump_board.py *_config-backup.json (nested, odrivetool restore-config format). The backup
   restores a board's own calibration results (R/L, encoder offset, pre_calibrated) after a flash
-  that reset its config, without moving the motor. Assignments on the command line are applied after it.
+  that reset its config, without moving the motor. Backup keys the board's firmware doesn't have
+  (e.g. from an older firmware) are skipped and listed. Assignments on the command line are applied after it.
 - --save calls save_configuration().
   - v0.5.1: writes flash and does NOT reboot. The flash write breaks PWM/ADC timing until a
     reboot, so reboot before moving.
@@ -60,6 +61,7 @@ def main():
     if not args.file and not args.assignments:
         ap.error("nothing to set")
     pairs = []
+    backup_paths = set()  # keys from a config backup; skipped when the board's firmware doesn't have them
     if args.file:
         doc = json.loads(pathlib.Path(args.file).read_text())
         if "settings" in doc:
@@ -72,7 +74,9 @@ def main():
                         yield from flatten(v, path)
                     else:
                         yield path, v
-            pairs.extend(flatten(doc, ""))
+            backup = list(flatten(doc, ""))
+            backup_paths = {path for path, _ in backup}
+            pairs.extend(backup)
     for a in args.assignments:
         path, _, val = a.partition("=")
         if not val:
@@ -98,12 +102,26 @@ def main():
         return 2
 
     props = []
+    skipped = []
     for path, text in pairs:  # validate everything before writing anything
-        prop = resolve(dev, path)
+        try:
+            prop = resolve(dev, path)
+        except KeyError:
+            if path not in backup_paths:
+                raise
+            skipped.append(path)
+            continue
         if not prop._can_write:
             print(f"{path} is read-only")
             return 2
         props.append((path, prop, parse(prop, text)))
+    if skipped:
+        # A top-level object the firmware lacks entirely (e.g. axis1) prints as one line.
+        tops = {path.split(".")[0] for path in skipped}
+        gone = {t for t in tops if all(p.split(".")[0] != t or p in skipped for p in backup_paths)}
+        shown = [f"{t}.* ({sum(p.split('.')[0] == t for p in skipped)} keys)" for t in sorted(gone)]
+        shown += [p for p in skipped if p.split(".")[0] not in gone]
+        print(f"skipped {len(skipped)} backup keys this firmware doesn't have: {', '.join(shown)}")
 
     changes = []
     for path, prop, new in props:
@@ -140,7 +158,7 @@ def main():
     with (LOGS / "actions.jsonl").open("a") as f:
         f.write(json.dumps({"t": datetime.datetime.now().astimezone().isoformat(), "action": "set_config",
                             "serial": serial, "pre_dump": snap[0].split()[-1], "file": args.file,
-                            "changes": changes, "saved": saved}) + "\n")
+                            "changes": changes, "skipped": skipped, "saved": saved}) + "\n")
     return 0 if all(c["ok"] for c in changes) and (saved or not args.save) else 3
 
 

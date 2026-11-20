@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 430" font-family="sans-serif" font-size="13" fill="#1f2937">
+  <title>Control structure: position, velocity and current loops, and the impedance path</title>
+  <rect width="980" height="430" fill="#ffffff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2937"/>
+    </marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#2563eb"/>
+    </marker>
+  </defs>
+
+  <!-- inputs -->
+  <text x="20" y="48" font-size="12" fill="#4b5563">input_pos, input_vel, input_torque</text>
+  <line x1="80" y1="56" x2="80" y2="96" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="20" y="98" width="120" height="56" rx="6" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="80" y="121" text-anchor="middle">Input mode</text>
+  <text x="80" y="139" text-anchor="middle" font-size="11" fill="#4b5563">filter, trap traj, …</text>
+
+  <!-- position loop -->
+  <line x1="140" y1="126" x2="183" y2="126" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="146" y="118" font-size="10" fill="#4b5563">pos_sp</text>
+  <circle cx="195" cy="126" r="12" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="195" y="131" text-anchor="middle" font-size="14">Σ</text>
+  <line x1="207" y1="126" x2="233" y2="126" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="235" y="102" width="100" height="48" rx="6" fill="#eef2f7" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="285" y="122" text-anchor="middle">Position P</text>
+  <text x="285" y="139" text-anchor="middle" font-size="11" fill="#4b5563">pos_gain</text>
+
+  <!-- velocity loop -->
+  <line x1="335" y1="126" x2="373" y2="126" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <circle cx="385" cy="126" r="12" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="385" y="131" text-anchor="middle" font-size="14">Σ</text>
+  <text x="352" y="74" font-size="10" fill="#4b5563">vel_sp (feed-forward)</text>
+  <line x1="385" y1="80" x2="385" y2="112" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="378" y="166" text-anchor="end" font-size="10" fill="#4b5563">clamp vel_limit</text>
+  <line x1="397" y1="126" x2="423" y2="126" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="425" y="102" width="120" height="48" rx="6" fill="#eef2f7" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="485" y="120" text-anchor="middle">Velocity PI</text>
+  <text x="485" y="134" text-anchor="middle" font-size="10" fill="#4b5563">vel_gain,</text>
+  <text x="485" y="146" text-anchor="middle" font-size="10" fill="#4b5563">vel_integrator_gain</text>
+
+  <!-- torque sum -->
+  <line x1="545" y1="126" x2="578" y2="126" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <circle cx="590" cy="126" r="12" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="590" y="131" text-anchor="middle" font-size="14">Σ</text>
+  <text x="556" y="74" font-size="10" fill="#4b5563">torque_sp (feed-forward)</text>
+  <line x1="590" y1="80" x2="590" y2="112" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- mode switch -->
+  <line x1="602" y1="126" x2="640" y2="126" stroke="#1f2937" stroke-width="1.5"/>
+  <circle cx="644" cy="126" r="3.5" fill="#1f2937"/>
+  <circle cx="644" cy="196" r="3.5" fill="#2563eb"/>
+  <line x1="680" y1="160" x2="646" y2="128" stroke="#1f2937" stroke-width="2"/>
+  <circle cx="682" cy="161" r="3.5" fill="#1f2937"/>
+  <text x="600" y="232" font-size="10" fill="#4b5563">control_mode</text>
+  <line x1="685" y1="161" x2="713" y2="161" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- current loop -->
+  <rect x="715" y="134" width="120" height="56" rx="6" fill="#eef2f7" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="775" y="156" text-anchor="middle">Current PI</text>
+  <text x="775" y="172" text-anchor="middle" font-size="11" fill="#4b5563">÷ torque_constant</text>
+  <text x="775" y="185" text-anchor="middle" font-size="11" fill="#4b5563">clamp current_lim</text>
+  <line x1="835" y1="161" x2="863" y2="161" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect x="865" y="134" width="100" height="56" rx="6" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <text x="915" y="157" text-anchor="middle">Motor</text>
+  <text x="915" y="175" text-anchor="middle" font-size="11" fill="#4b5563">+ encoder</text>
+
+  <!-- feedback -->
+  <path d="M 915 190 V 270 H 195 V 140" fill="none" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <path d="M 385 270 V 140" fill="none" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="203" y="262" font-size="10" fill="#4b5563">− pos</text>
+  <text x="393" y="262" font-size="10" fill="#4b5563">− vel</text>
+  <text x="700" y="262" font-size="10" fill="#4b5563">position and velocity estimates</text>
+  <circle cx="385" cy="270" r="3" fill="#1f2937"/>
+
+  <!-- impedance path -->
+  <rect x="235" y="312" width="360" height="58" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="2"/>
+  <text x="415" y="335" text-anchor="middle" fill="#2563eb">Impedance (control_mode 4)</text>
+  <text x="415" y="355" text-anchor="middle" font-size="12" font-family="monospace" fill="#2563eb">kp·(pos_sp − pos) + kd·(vel_sp − vel) + torque_sp</text>
+  <path d="M 140 140 V 341 H 233" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#b)"/>
+  <text x="146" y="333" font-size="10" fill="#2563eb">setpoints</text>
+  <path d="M 595 341 H 644 V 200" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#b)"/>
+  <path d="M 415 270 V 310" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3" marker-end="url(#b)"/>
+  <text x="422" y="296" font-size="10" fill="#2563eb">pos, vel</text>
+
+  <text x="490" y="412" text-anchor="middle" font-size="11" fill="#4b5563">Torque control uses only the current loop; velocity control starts at the velocity loop. Impedance control has no integrator. All run every 125 µs.</text>
+</svg>

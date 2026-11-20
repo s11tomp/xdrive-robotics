@@ -256,14 +256,14 @@ interfaces:
         brief: Enables/disables UART_A.
         doc: |
           You also need to set the corresponding GPIOs to GPIO_MODE_UART_A.
-          Refer to [interfaces](interfaces.md) to see which pins support UART_A.
+          Refer to [Hardware](hardware.md#gpios) to see which pins support UART_A.
           Changing this requires a reboot.
       enable_uart_b:
         type: bool
         brief: Enables/disables UART_B.
         doc: |
           You also need to set the corresponding GPIOs to GPIO_MODE_UART_B.
-          Refer to [interfaces](interfaces.md) to see which pins support UART_B.
+          Refer to [Hardware](hardware.md#gpios) to see which pins support UART_B.
           Changing this requires a reboot.
       enable_uart_c: {type: bool, doc: Not supported on ODrive v3.x.}
       uart_a_baudrate:
@@ -1667,7 +1667,7 @@ valuetypes:
         doc: |
           Human readable protocol designed for easy implementation for cases
           where the use of libfibre is not desired or feasible.
-          Refer to [this page](ascii-protocol.md) for details.
+          Refer to [ODrive's ASCII protocol page](https://docs.odriverobotics.com/v/0.5.6/ascii-protocol.html) for details.
       Stdout: {doc: Output of printf(). Only intended for developers who modify
           ODrive firmware.}
       AsciiAndStdout: {doc: Combination of `Ascii` and `Stdout`.}
@@ -1853,7 +1853,7 @@ valuetypes:
           Intended for use with step/dir interface, but can also be used with
           position-only commands.
 
-          ![POS Filter Response](../secondOrderResponse.PNG)
+          Step response: [Control](control.md#position-filter-3).
           Result of a step command from 1000 to 0
 
           ### Configuration Values:
@@ -1870,7 +1870,7 @@ valuetypes:
       TRAP_TRAJ:
         brief: Implementes an online trapezoidal trajectory planner.
         doc: |
-          ![Trapezoidal Planner Response](../TrapTrajPosVel.PNG)
+          A move: [Control](control.md#trapezoidal-trajectory-5).
 
           ### Configuration Values:
           * `Axis:trap_traj.config.vel_limit`

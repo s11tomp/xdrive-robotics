@@ -93,7 +93,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 
 ## Versioning
 
-Releases are numbered from 1.0.0, independently of ODrive, and each release states its ODrive base. Upstream ODrive firmware for v3.x boards ends at 0.5.6, so a v3.6 board reporting 1.x runs this firmware. A major version marks a config-layout change: flashing across it resets the board's config. A build of any commit after a release tag, or of a modified tree, reports that release's version with `fw_version_unreleased = 1`.
+Releases are numbered from 1.0.0, independently of ODrive, and each release states its ODrive base. Upstream ODrive firmware for v3.x boards ends at 0.5.6, so a v3.6 board reporting 1.x runs this firmware. A major version marks a config-layout change: flashing across it resets the board's config. A build of any commit after a release tag, or of a modified tree, reports that release's version with `fw_version_unreleased = 1`. Releases, with the ELF, BIN and HEX images and their SHA-256 sums, are on the GitHub releases page; `CHANGELOG.md` lists what each one changes.
 
 ## Support
 

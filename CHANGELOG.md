@@ -1,6 +1,6 @@
 # Changelog
 
-This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions it builds on.
+This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions it builds on. Each release's section (`## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`) becomes the notes of its GitHub release; changes not yet released collect under the next version, dated `Unreleased`.
 
 ## xdrive-robotics [1.0.0] - Unreleased
 

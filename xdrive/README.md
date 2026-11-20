@@ -54,3 +54,12 @@ The `.bin` and `.hex` are then identical to the build outputs in Makerbase's sou
 - **Afterwards:** Motor moves: the board reboots and its startup sequence runs.
 - **SWD wiring:** J2 GND/SWCLK/SWDIO, plus NRST (J2 pin 5) to the ST-Link's RST, so a crashed build can still be reached with connect-under-reset.
 - **Never written:** the option bytes (read and write protection).
+
+## Releasing
+Pushing a tag `fw-vX.Y.Z` releases X.Y.Z: CI (`.github/workflows/build.yml`) checks that `CHANGELOG.md` has a dated section for X.Y.Z, builds, checks that the firmware reports exactly X.Y.Z (`fw_version_unreleased = 0`), and publishes a GitHub release named "xdrive-robotics X.Y.Z" with `xdrive-robotics-X.Y.Z.{elf,bin,hex}`, `SHA256SUMS` and the changelog section as its notes. A failed check publishes nothing.
+1. In `CHANGELOG.md`, change the section's heading from `Unreleased` to the release date: `## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`.
+2. `python xdrive/tools/release_notes.py X.Y.Z` (prints the release notes, or what is missing).
+3. Commit and push `main`.
+4. `git tag fw-vX.Y.Z`
+5. `git push origin fw-vX.Y.Z`
+6. Afterwards, start the next section: `## xdrive-robotics [X.Y.Z+1] - Unreleased` (or the next minor or major, per the versioning rules in the top-level README).

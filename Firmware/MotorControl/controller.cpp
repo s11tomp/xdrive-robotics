@@ -296,7 +296,10 @@ bool Controller::update() {
             
             if (axis_->trap_traj_.t_ > axis_->trap_traj_.Tf_) {
                 // Drop into position control mode when done to avoid problems on loop counter delta overflow
-                config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
+                // (impedance control keeps its own law: it has no loop counter)
+                if (config_.control_mode != CONTROL_MODE_IMPEDANCE_CONTROL) {
+                    config_.control_mode = CONTROL_MODE_POSITION_CONTROL;
+                }
                 pos_setpoint_ = axis_->trap_traj_.Xf_;
                 vel_setpoint_ = 0.0f;
                 torque_setpoint_ = 0.0f;
@@ -328,6 +331,10 @@ bool Controller::update() {
     // A timeout holds position whatever the configured mode (trap traj may change the mode above).
     const ControlMode control_mode = timeout_active_ ? CONTROL_MODE_POSITION_CONTROL : config_.control_mode;
     const bool armed = axis_->motor_.is_armed_ && axis_->current_state_ == Axis::AXIS_STATE_CLOSED_LOOP_CONTROL;
+    // Impedance control: torque = kp * pos_err + kd * vel_err + torque_setpoint (see the IMPEDANCE_CONTROL doc)
+    const bool impedance = control_mode == CONTROL_MODE_IMPEDANCE_CONTROL;
+    const float kp = impedance ? std::max(input_kp_, 0.0f) : 0.0f;
+    const float kd = impedance ? std::max(input_kd_, 0.0f) : 0.0f;
 
     // Soft limits (linear position): the position setpoint stays inside [pos_min, pos_max], and
     // the velocity command may only point back inside once at or past a limit.
@@ -390,10 +397,12 @@ bool Controller::update() {
             pos_err = pos_setpoint_ - *pos_estimate_linear;
         }
 
-        vel_des += config_.pos_gain * pos_err;
+        if (!impedance) {
+            vel_des += config_.pos_gain * pos_err;
+        }
         // V-shaped gain shedule based on position error
         float abs_pos_err = std::abs(pos_err);
-        if (config_.enable_gain_scheduling && abs_pos_err <= config_.gain_scheduling_width) {
+        if (!impedance && config_.enable_gain_scheduling && abs_pos_err <= config_.gain_scheduling_width) {
             gain_scheduling_multiplier = abs_pos_err / config_.gain_scheduling_width;
         }
     }
@@ -417,12 +426,16 @@ bool Controller::update() {
     }
 
     // Following-error faults (jams, collisions, encoder slip)
-    if (armed && control_mode >= CONTROL_MODE_POSITION_CONTROL && std::abs(pos_err) > config_.max_pos_error) {
+    // In impedance control, each check covers only a term its gain actually controls.
+    const bool pos_controlled = control_mode == CONTROL_MODE_POSITION_CONTROL || kp > 0.0f;
+    const bool vel_controlled = control_mode == CONTROL_MODE_VELOCITY_CONTROL || control_mode == CONTROL_MODE_POSITION_CONTROL
+                                || kd > 0.0f;
+    if (armed && pos_controlled && std::abs(pos_err) > config_.max_pos_error) {
         set_error(ERROR_POS_FOLLOWING_ERROR);
         torque_output_ = 0.0f;  // the motor would otherwise apply a stale output until the disarm
         return false;
     }
-    if (armed && control_mode >= CONTROL_MODE_VELOCITY_CONTROL && vel_estimate.has_value()
+    if (armed && vel_controlled && vel_estimate.has_value()
             && std::abs(vel_setpoint_ - *vel_estimate) > config_.max_vel_error) {
         set_error(ERROR_VEL_FOLLOWING_ERROR);
         torque_output_ = 0.0f;  // the motor would otherwise apply a stale output until the disarm
@@ -460,7 +473,13 @@ bool Controller::update() {
     }
 
     float v_err = 0.0f;
-    if (control_mode >= CONTROL_MODE_VELOCITY_CONTROL) {
+    if (impedance) {
+        if (!vel_estimate.has_value()) {
+            set_error(ERROR_INVALID_ESTIMATE);
+            return false;
+        }
+        torque += kp * pos_err + kd * (vel_setpoint_ - *vel_estimate);
+    } else if (control_mode >= CONTROL_MODE_VELOCITY_CONTROL) {
         if (!vel_estimate.has_value()) {
             set_error(ERROR_INVALID_ESTIMATE);
             return false;
@@ -494,7 +513,7 @@ bool Controller::update() {
     }
 
     // Velocity integrator (behaviour dependent on limiting)
-    if (control_mode < CONTROL_MODE_VELOCITY_CONTROL) {
+    if (control_mode < CONTROL_MODE_VELOCITY_CONTROL || impedance) {
         // reset integral if not in use
         vel_integrator_torque_ = 0.0f;
     } else {

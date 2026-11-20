@@ -37,6 +37,7 @@ class CANSimple {
         MSG_SET_VEL_GAINS,
         MSG_GET_ADC_VOLTAGE,
         MSG_GET_CONTROLLER_ERROR,
+        MSG_IMPEDANCE,  // XDRIVE: impedance command; the reply uses the same ID (impedance_frame.hpp)
         MSG_CO_HEARTBEAT_CMD = 0x700,  // CANOpen NMT Heartbeat  SEND
     };
 
@@ -66,6 +67,8 @@ class CANSimple {
     bool get_bus_voltage_current_callback(const Axis& axis);
     // msg.rtr bit must NOT be set
     bool get_adc_voltage_callback(const Axis& axis, const can_Message_t& msg);
+    // Sets the inputs and gains, then replies with the axis state
+    bool impedance_callback(Axis& axis, const can_Message_t& msg);
 
     // Set functions
     static void set_axis_nodeid_callback(Axis& axis, const can_Message_t& msg);

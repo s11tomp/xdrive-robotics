@@ -64,6 +64,12 @@ public:
         uint32_t iq_rate_ms = 0;
         uint32_t sensorless_rate_ms = 0;
         uint32_t bus_vi_rate_ms = 0;
+        // Full-scale values of the impedance command and reply fields (communication/can/impedance_frame.hpp)
+        float impedance_pos_range = 16.0f;    // [turn] +/-
+        float impedance_vel_range = 32.0f;    // [turn/s] +/-
+        float impedance_kp_max = 200.0f;      // [Nm/turn]
+        float impedance_kd_max = 2.0f;        // [Nm/(turn/s)]
+        float impedance_torque_range = 4.0f;  // [Nm] +/-
     };
 
     struct Config_t {

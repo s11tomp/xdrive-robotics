@@ -21,6 +21,8 @@ reference material.
   - Watchdog `DECEL_HOLD` (`axis.config.watchdog_action`, `watchdog_decel`, `watchdog_torque_lim`; status in `controller.timeout_active`). Feed the watchdog, then `clear_errors()` to resume.
   - Soft position limits (`controller.config.pos_min`/`pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). All off (infinite) by default.
   - Closed-loop entry starts from rest (zero velocity/torque setpoints, no running trajectory).
+  - Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL` = 4): torque = `controller.input_kp`·pos error + `input_kd`·vel error + `input_torque`, no integrator.
+  - CAN impedance command (CANSimple ID 0x1E: position, velocity, kp, kd, torque in 8 bytes) with an immediate reply on the same ID (position, velocity, measured torque, flags, FET temperature, bus voltage). Layout: `Firmware/communication/can/impedance_frame.hpp`; full scales: `axis.config.can.impedance_*`.
 
 ## Toolchain
 `main` (v0.5.6) builds with GNU Arm Embedded **10.3-2021.10** (GCC 10.3.1), the version v0.5.6's CI

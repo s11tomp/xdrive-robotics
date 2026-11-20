@@ -628,6 +628,11 @@ interfaces:
       iq_rate_ms: uint32
       sensorless_rate_ms: uint32
       bus_vi_rate_ms: uint32
+      impedance_pos_range: {type: float32, unit: turn, doc: "XDRIVE: full scale (+/-) of the position fields of the impedance command and reply (MSG_IMPEDANCE, 16 bit). Positions beyond it saturate."}
+      impedance_vel_range: {type: float32, unit: turn/s, doc: "XDRIVE: full scale (+/-) of the velocity fields of the impedance command and reply (12 bit)."}
+      impedance_kp_max: {type: float32, unit: N·m/turn, doc: "XDRIVE: full scale of the impedance command's kp field (12 bit, 0..max)."}
+      impedance_kd_max: {type: float32, unit: N·m/(turn/s), doc: "XDRIVE: full scale of the impedance command's kd field (12 bit, 0..max)."}
+      impedance_torque_range: {type: float32, unit: N·m, doc: "XDRIVE: full scale (+/-) of the torque fields of the impedance command and reply (12 bit)."}
 
   ODrive.ThermistorCurrentLimiter:
     c_is_class: False
@@ -1079,8 +1084,18 @@ interfaces:
         unit: N·m
         doc: |
           In `CONTROL_MODE_TORQUE_CONTROL`, sets the desired output torque of the axis.
-          In `CONTROL_MODE_VELOCITY_CONTROL` and `CONTROL_MODE_POSITION_CONTROL`, sets the feed-forward torque of the torque controller.
+          In `CONTROL_MODE_VELOCITY_CONTROL`, `CONTROL_MODE_POSITION_CONTROL` and `CONTROL_MODE_IMPEDANCE_CONTROL`, sets the feed-forward torque of the torque controller.
           In `INPUT_MODE_TUNING`, this acts as a DC offset for the torque sine wave.
+      input_kp:
+        type: float32
+        unit: N·m/turn
+        doc: |
+          XDRIVE: stiffness in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
+      input_kd:
+        type: float32
+        unit: N·m/(turn/s)
+        doc: |
+          XDRIVE: damping in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
       pos_setpoint:
         type: readonly float32
         unit: turn
@@ -1740,6 +1755,15 @@ valuetypes:
         doc: |
           Uses the inner torque loop, the velocity control loop, and the outer position control loop.
           Use `input_pos` to command desired position, `input_vel` to command velocity feed-forward, and `input_torque` for torque feed-forward.
+      IMPEDANCE_CONTROL:
+        doc: |
+          XDRIVE: a spring and damper toward the setpoint, computed every control period:
+          torque = input_kp * (pos_setpoint - pos) + input_kd * (vel_setpoint - vel) + torque_setpoint.
+          No velocity integrator, no position gain scheduling; a steady load deflects the axis by load / input_kp.
+          input_kp = input_kd = 0 is torque control (without `enable_torque_mode_vel_limit`); input_kp = 0 damps only.
+          Soft limits, following-error checks (the position check only while input_kp > 0, the velocity check only
+          while input_kd > 0), the torque limits and the watchdog apply as in position control. A watchdog
+          DECEL_HOLD holds with the position-control gains (`pos_gain`, `vel_gain`, `vel_integrator_gain`).
 
   ODrive.Controller.InputMode:
     values:

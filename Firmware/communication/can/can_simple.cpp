@@ -4,6 +4,8 @@
 #include <odrive_main.h>
 #include <functional>
 
+#include "impedance_frame.hpp"
+
 bool CANSimple::init() {
     for (size_t i = 0; i < AXIS_COUNT; ++i) {
         if (!renew_subscription(i)) {
@@ -157,6 +159,9 @@ void CANSimple::do_command(Axis& axis, const can_Message_t& msg) {
             break;
         case MSG_GET_CONTROLLER_ERROR:
             get_controller_error_callback(axis);
+            break;
+        case MSG_IMPEDANCE:
+            impedance_callback(axis, msg);
             break;
         default:
             break;
@@ -381,6 +386,52 @@ bool CANSimple::get_adc_voltage_callback(const Axis& axis, const can_Message_t& 
     } else {
         return false;
     }
+}
+
+static impedance_frame::Ranges impedance_ranges(const Axis& axis) {
+    const auto& c = axis.config_.can;
+    return {c.impedance_pos_range, c.impedance_vel_range, c.impedance_kp_max, c.impedance_kd_max,
+            c.impedance_torque_range};
+}
+
+bool CANSimple::impedance_callback(Axis& axis, const can_Message_t& msg) {
+    if (msg.rtr || msg.len != 8) {
+        return false;
+    }
+    const impedance_frame::Ranges ranges = impedance_ranges(axis);
+    const impedance_frame::Command cmd = impedance_frame::decode_command(msg.buf, ranges);
+    Controller& ctrl = axis.controller_;
+    // One critical section, so the control loop never runs on a mix of old and new values.
+    CRITICAL_SECTION() {
+        ctrl.set_input_pos_and_steps(cmd.pos);
+        ctrl.input_vel_ = cmd.vel;
+        ctrl.input_kp_ = cmd.kp;
+        ctrl.input_kd_ = cmd.kd;
+        ctrl.input_torque_ = cmd.torque;
+        ctrl.input_pos_updated();
+    }
+
+    const Motor& motor = axis.motor_;
+    uint8_t flags = 0;
+    if (motor.is_armed_ && axis.current_state_ == Axis::AXIS_STATE_CLOSED_LOOP_CONTROL) {
+        flags |= impedance_frame::FLAG_ARMED;
+    }
+    if (axis.error_ || motor.error_ || axis.encoder_.error_ || ctrl.error_) {
+        flags |= impedance_frame::FLAG_ERROR;
+    }
+    if (ctrl.timeout_active_) {
+        flags |= impedance_frame::FLAG_TIMEOUT;
+    }
+    const float torque = motor.direction_ * motor.current_control_.Iq_measured_ * motor.config_.torque_constant;
+
+    can_Message_t txmsg;
+    txmsg.id = (axis.config_.can.node_id << NUM_CMD_ID_BITS) + MSG_IMPEDANCE;
+    txmsg.isExt = axis.config_.can.is_extended;
+    txmsg.len = 8;
+    impedance_frame::encode_reply(txmsg.buf, ranges, ctrl.pos_estimate_linear_src_.any().value_or(0.0f),
+                                  ctrl.vel_estimate_src_.any().value_or(0.0f), torque, flags,
+                                  motor.fet_thermistor_.temperature_, vbus_voltage);
+    return canbus_->send_message(txmsg);
 }
 
 void CANSimple::clear_errors_callback(Axis& axis, const can_Message_t& msg) {

@@ -124,6 +124,8 @@ public:
     float input_pos_ = 0.0f;     // [turns]
     float input_vel_ = 0.0f;     // [turn/s]
     float input_torque_ = 0.0f;  // [Nm]
+    float input_kp_ = 0.0f;      // [Nm/turn] stiffness in CONTROL_MODE_IMPEDANCE_CONTROL
+    float input_kd_ = 0.0f;      // [Nm/(turn/s)] damping in CONTROL_MODE_IMPEDANCE_CONTROL
     float input_filter_kp_ = 0.0f;
     float input_filter_ki_ = 0.0f;
 

@@ -116,7 +116,8 @@ void safety_critical_disarm_brake_resistor() {
 // @brief Updates the brake resistor PWM timings unless
 // the brake resistor is disarmed.
 void safety_critical_apply_brake_resistor_timings(uint32_t low_off, uint32_t high_on) {
-    if (high_on - low_off < TIM_APB1_DEADTIME_CLOCKS) {
+    // The dead time only matters when the high side can turn on (high_on <= period).
+    if (high_on <= TIM_APB1_PERIOD_CLOCKS && high_on - low_off < TIM_APB1_DEADTIME_CLOCKS) {
         odrv.disarm_with_error(ODrive::ERROR_BRAKE_DEADTIME_VIOLATION);
     }
 
@@ -391,6 +392,16 @@ void update_brake_current() {
     int high_on = (int)(TIM_APB1_PERIOD_CLOCKS * (1.0f - brake_duty));
     int low_off = high_on - TIM_APB1_DEADTIME_CLOCKS;
     if (low_off < 0) low_off = 0;
+    if (brake_duty <= 0.0f) {
+        // XDRIVE: at zero duty keep the bridge static (low side on, high side off) instead of
+        // switching the low side off for the dead-time window every cycle. TIM2 is not
+        // synchronized with the control loop, and those edges offset both current-sense
+        // channels for one period whenever they land near the sampling instant (every
+        // 128 control periods). The duty is recomputed every control period, so braking
+        // still starts within one period of any regen current.
+        high_on = TIM_APB1_PERIOD_CLOCKS + 1;
+        low_off = TIM_APB1_PERIOD_CLOCKS + 1;
+    }
     safety_critical_apply_brake_resistor_timings(low_off, high_on);
 }
 

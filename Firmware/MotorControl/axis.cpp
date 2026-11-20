@@ -291,8 +291,13 @@ bool Axis::start_closed_loop_control() {
             return false;
         }
 
-        // A new closed-loop entry ends a watchdog timeout (the state machine feeds the watchdog first).
+        // A new closed-loop entry ends a watchdog timeout (the state machine feeds the watchdog first)
+        // and starts from rest: the controller also updates in IDLE, so a trajectory aborted by a fault
+        // keeps moving its setpoints there, and a new trajectory planned from that velocity would lurch.
         controller_.timeout_active_ = false;
+        controller_.vel_setpoint_ = 0.0f;
+        controller_.torque_setpoint_ = 0.0f;
+        controller_.trajectory_done_ = true;
 
         // To avoid any transient on startup, we intialize the setpoint to be the current position
         controller_.control_mode_updated();

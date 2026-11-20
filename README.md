@@ -17,7 +17,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 
 ## What it adds to ODrive v0.5.6
 
-- **One axis, matching the Mini.** The Mini has one motor channel, and the firmware has one axis (`axis0`): no second axis on USB or CAN, no errors from a missing second gate driver, and the second motor's code, RAM and per-cycle work removed (control loop 74 µs busy per 125 µs cycle, down from 86). Stock v0.5.6 doesn't drive the Mini at all: it keeps retrying the missing second driver over the SPI bus the encoder shares.
+- **One axis, matching the Mini.** The Mini has one motor channel, and the firmware has one axis (`axis0`): no second axis on USB or CAN, no errors from a missing second gate driver, and the second motor's code, RAM and per-cycle work removed (control loop 73 µs busy per 125 µs cycle, down from 86). Stock v0.5.6 doesn't drive the Mini at all: it keeps retrying the missing second driver over the SPI bus the encoder shares.
 - **Encoder integrity:** AS5047 frame checks (error flag, parity) with counters, and rejection of impossible jumps.
 - **Encoder correction table:** a calibration state (`AXIS_STATE_ENCODER_CORRECTION_CALIBRATION`, 14) measures the angle error of an off-center magnet over one turn, and the firmware corrects it at run time (256 bins, harmonics 1 to 12). On a bench stand it removed 92 % of a 4x-per-turn current ripple.
 - **Boot without motion:** with a pre-calibrated encoder the board goes straight to closed loop about 2.5 s after power-up.

@@ -85,6 +85,9 @@ public:
 
         float watchdog_timeout = 0.0f; // [s]
         bool enable_watchdog = false;
+        WatchdogAction watchdog_action = WATCHDOG_ACTION_DECEL_HOLD;
+        float watchdog_decel = 10.0f;            // [turn/s^2] for DECEL_HOLD
+        float watchdog_torque_lim = INFINITY;    // [Nm] torque cap while in DECEL_HOLD timeout
 
         // Defaults loaded from hw_config in load_configuration in main.cpp
         uint16_t step_gpio_pin = 0;

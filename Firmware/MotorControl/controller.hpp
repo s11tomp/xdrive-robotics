@@ -53,6 +53,11 @@ public:
         float electrical_power_bandwidth = 20.0f; // [rad/s] filter cutoff for electrical power for spinout detection
         float spinout_electrical_power_threshold = 10.0f; // [W] electrical power threshold for spinout detection
         float spinout_mechanical_power_threshold = -10.0f; // [W] mechanical power threshold for spinout detection
+        float pos_min = -INFINITY;               // [turn] soft limit (linear position)
+        float pos_max = INFINITY;                // [turn] soft limit (linear position)
+        float pos_limit_margin = 0.1f;           // [turn] POS_LIMIT_VIOLATION beyond a limit by more than this
+        float max_pos_error = INFINITY;          // [turn] POS_FOLLOWING_ERROR threshold
+        float max_vel_error = INFINITY;          // [turn/s] VEL_FOLLOWING_ERROR threshold
 
         // custom setters
         Controller* parent;
@@ -90,6 +95,13 @@ public:
 
     void update_filter_gains();
     bool update();
+
+    // Watchdog timeout with DECEL_HOLD (called from the control loop). Returns false without a
+    // position estimate, so the caller falls back to disarming.
+    bool enter_timeout();
+    // Ends a timeout; the inputs are set to the hold position so the next command starts from there.
+    void clear_timeout();
+    bool timeout_active_ = false;
 
     Config_t config_;
     Axis* axis_ = nullptr; // set by Axis constructor

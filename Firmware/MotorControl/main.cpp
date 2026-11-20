@@ -237,6 +237,7 @@ void ODrive::clear_errors() {
     for (auto& axis: axes) {
         axis.motor_.error_ = Motor::ERROR_NONE;
         axis.controller_.error_ = Controller::ERROR_NONE;
+        axis.controller_.clear_timeout();
         axis.sensorless_estimator_.error_ = SensorlessEstimator::ERROR_NONE;
         axis.encoder_.error_ = Encoder::ERROR_NONE;
         axis.encoder_.spi_error_rate_ = 0.0f;

@@ -526,6 +526,17 @@ interfaces:
             type: float32
             unit: s
           enable_watchdog: bool
+          watchdog_action:
+            type: WatchdogAction
+            doc: "XDRIVE: what the axis does in closed loop when the watchdog expires."
+          watchdog_decel:
+            type: float32
+            unit: turn/s^2
+            doc: "XDRIVE: deceleration for watchdog_action = DECEL_HOLD."
+          watchdog_torque_lim:
+            type: float32
+            unit: N·m
+            doc: "XDRIVE: torque cap while decelerating and holding after a watchdog timeout. Infinity = the normal limit."
           step_gpio_pin: {type: uint16, c_setter: 'set_step_gpio_pin'}
           dir_gpio_pin: {type: uint16, c_setter: 'set_dir_gpio_pin'}
           calibration_lockin: # TODO: this is a subset of lockin state
@@ -1014,6 +1025,15 @@ interfaces:
               Check that your encoder is not slipping on the motor. If using an Index pin, check
               that you are not getting false index pulses caused by noise. This can happen if you
               are using unshielded cable for the encoder signals.
+          POS_LIMIT_VIOLATION:
+            brief: "XDRIVE: the position went beyond `config.pos_min`/`config.pos_max` by more than `config.pos_limit_margin`."
+            doc: Checked only while armed in closed loop. Entering closed loop outside the limits also raises it.
+          POS_FOLLOWING_ERROR:
+            brief: "XDRIVE: |pos_setpoint - pos_estimate| exceeded `config.max_pos_error` (position control)."
+            doc: Catches jams, collisions and encoder slip. Checked only while armed in closed loop.
+          VEL_FOLLOWING_ERROR:
+            brief: "XDRIVE: |vel_setpoint - vel_estimate| exceeded `config.max_vel_error` (velocity or position control)."
+            doc: Checked only while armed in closed loop.
       last_error_time: float32
       input_pos:
         type: float32
@@ -1052,6 +1072,13 @@ interfaces:
       trajectory_done: 
         type: readonly bool
         doc: Indicates the last commanded Trapezoidal Trajectory movement is complete.
+      timeout_active:
+        type: readonly bool
+        doc: |
+          XDRIVE: the axis watchdog expired with `axis.config.watchdog_action = DECEL_HOLD`. The controller
+          decelerates to a stop at `axis.config.watchdog_decel`, holds that position and ignores new inputs.
+          Ends on `clear_errors()` (feed the watchdog first) or on a new entry into closed loop; the inputs
+          are then set to the hold position.
       vel_integrator_torque: 
         type: float32
         unit: N·m
@@ -1169,6 +1196,26 @@ interfaces:
             type: float32
             doc: "Electrical power threshold for spinout detection. This should be a positive value"
             unit: Watt
+          pos_min:
+            type: float32
+            unit: turn
+            doc: "XDRIVE: soft limit. Trap-trajectory targets and the position setpoint are clamped to [pos_min, pos_max]. -Infinity to disable."
+          pos_max:
+            type: float32
+            unit: turn
+            doc: "XDRIVE: soft limit, see pos_min. Infinity to disable."
+          pos_limit_margin:
+            type: float32
+            unit: turn
+            doc: "XDRIVE: POS_LIMIT_VIOLATION when the position estimate is beyond a limit by more than this."
+          max_pos_error:
+            type: float32
+            unit: turn
+            doc: "XDRIVE: POS_FOLLOWING_ERROR threshold. Infinity to disable."
+          max_vel_error:
+            type: float32
+            unit: turn/s
+            doc: "XDRIVE: VEL_FOLLOWING_ERROR threshold. Infinity to disable."
       autotuning:
         c_is_class: False
         doc: Automatically generate sine waves for frequency-domain response tuning
@@ -1616,6 +1663,16 @@ valuetypes:
           Turns an open-loop current vector (calibration_current, calib_scan_omega) forward and back over
           encoder.config.correction_scan_turns mechanical turns. Needs a calibrated motor and a ready encoder.
           Re-run ENCODER_OFFSET_CALIBRATION afterwards, then save.
+
+  ODrive.Axis.WatchdogAction:
+    values:
+      DISARM:
+        doc: Set AXIS_ERROR_WATCHDOG_TIMER_EXPIRED and disarm (the motor goes limp). Stock ODrive behavior.
+      DECEL_HOLD:
+        doc: |
+          XDRIVE: decelerate to a stop at `config.watchdog_decel`, then hold that position with torque capped at
+          `config.watchdog_torque_lim`. Reported by `controller.timeout_active`, not as an error.
+          Outside armed closed loop the watchdog disarms with an error as in DISARM.
 
   ODrive.Encoder.Mode:
     values:

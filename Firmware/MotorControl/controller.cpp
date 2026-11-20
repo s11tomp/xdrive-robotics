@@ -29,6 +29,8 @@ void Controller::set_error(Error error) {
 
 
 void Controller::move_to_pos(float goal_point) {
+    // Soft limits: plan onto the limit so the move decelerates there.
+    goal_point = std::max(std::min(goal_point, config_.pos_max), config_.pos_min);
     axis_->trap_traj_.planTrapezoidal(goal_point, pos_setpoint_, vel_setpoint_,
                                  axis_->trap_traj_.config_.vel_limit,
                                  axis_->trap_traj_.config_.accel_limit,
@@ -112,6 +114,40 @@ void Controller::set_input_pos_and_steps(float const pos) {
     }
 }
 
+bool Controller::enter_timeout() {
+    if (timeout_active_) {
+        return true;
+    }
+    std::optional<float> pos = (config_.circular_setpoints ?
+                                pos_estimate_circular_src_ :
+                                pos_estimate_linear_src_).any();
+    std::optional<float> vel = vel_estimate_src_.any();
+    if (!pos.has_value() || !vel.has_value()) {
+        return false;
+    }
+    // Stop from where the rotor is and how fast it moves, not from a setpoint it may not be tracking.
+    pos_setpoint_ = *pos;
+    vel_setpoint_ = *vel;
+    torque_setpoint_ = 0.0f;
+    timeout_active_ = true;
+    return true;
+}
+
+void Controller::clear_timeout() {
+    if (!timeout_active_) {
+        return;
+    }
+    CRITICAL_SECTION() {
+        set_input_pos_and_steps(pos_setpoint_);
+        input_vel_ = 0.0f;
+        input_torque_ = 0.0f;
+        input_pos_updated_ = false;
+        trajectory_done_ = true;
+        vel_setpoint_ = 0.0f;
+        timeout_active_ = false;
+    }
+}
+
 bool Controller::control_mode_updated() {
     if (config_.control_mode >= CONTROL_MODE_POSITION_CONTROL) {
         std::optional<float> estimate = (config_.circular_setpoints ?
@@ -180,7 +216,14 @@ bool Controller::update() {
     }
 
     // Update inputs
-    switch (config_.input_mode) {
+    if (timeout_active_) {
+        // Watchdog DECEL_HOLD: ramp the velocity setpoint to zero, integrate it into the position
+        // setpoint, then hold there. New inputs are ignored until clear_timeout().
+        float dv = std::abs(axis_->config_.watchdog_decel) * current_meas_period;
+        vel_setpoint_ = (std::abs(vel_setpoint_) <= dv) ? 0.0f : vel_setpoint_ - std::copysign(dv, vel_setpoint_);
+        pos_setpoint_ += vel_setpoint_ * current_meas_period;
+        torque_setpoint_ = 0.0f;
+    } else switch (config_.input_mode) {
         case INPUT_MODE_INACTIVE: {
             // do nothing
         } break;
@@ -282,20 +325,52 @@ bool Controller::update() {
         
     }
 
+    // A timeout holds position whatever the configured mode (trap traj may change the mode above).
+    const ControlMode control_mode = timeout_active_ ? CONTROL_MODE_POSITION_CONTROL : config_.control_mode;
+    const bool armed = axis_->motor_.is_armed_ && axis_->current_state_ == Axis::AXIS_STATE_CLOSED_LOOP_CONTROL;
+
+    // Soft limits (linear position): the position setpoint stays inside [pos_min, pos_max], and
+    // the velocity command may only point back inside once at or past a limit.
+    if (control_mode >= CONTROL_MODE_POSITION_CONTROL) {
+        if (pos_setpoint_ > config_.pos_max) {
+            pos_setpoint_ = config_.pos_max;
+            vel_setpoint_ = std::min(vel_setpoint_, 0.0f);
+        }
+        if (pos_setpoint_ < config_.pos_min) {
+            pos_setpoint_ = config_.pos_min;
+            vel_setpoint_ = std::max(vel_setpoint_, 0.0f);
+        }
+    } else if (control_mode == CONTROL_MODE_VELOCITY_CONTROL && pos_estimate_linear.has_value()) {
+        if (*pos_estimate_linear >= config_.pos_max) {
+            vel_setpoint_ = std::min(vel_setpoint_, 0.0f);
+        }
+        if (*pos_estimate_linear <= config_.pos_min) {
+            vel_setpoint_ = std::max(vel_setpoint_, 0.0f);
+        }
+    }
+    if (armed && pos_estimate_linear.has_value()
+            && (*pos_estimate_linear > config_.pos_max + config_.pos_limit_margin
+                || *pos_estimate_linear < config_.pos_min - config_.pos_limit_margin)) {
+        set_error(ERROR_POS_LIMIT_VIOLATION);
+        return false;
+    }
+
     // Never command a setpoint beyond its limit
     if(config_.enable_vel_limit) {
         vel_setpoint_ = std::clamp(vel_setpoint_, -config_.vel_limit, config_.vel_limit);
     }
-    const float Tlim = axis_->motor_.max_available_torque();
+    float Tlim = axis_->motor_.max_available_torque();
+    if (timeout_active_) {
+        Tlim = std::min(Tlim, axis_->config_.watchdog_torque_lim);
+    }
     torque_setpoint_ = std::clamp(torque_setpoint_, -Tlim, Tlim);
 
     // Position control
     // TODO Decide if we want to use encoder or pll position here
     float gain_scheduling_multiplier = 1.0f;
     float vel_des = vel_setpoint_;
-    if (config_.control_mode >= CONTROL_MODE_POSITION_CONTROL) {
-        float pos_err;
-
+    float pos_err = 0.0f;
+    if (control_mode >= CONTROL_MODE_POSITION_CONTROL) {
         if (config_.circular_setpoints) {
             if (!pos_estimate_circular.has_value() || !pos_wrap.has_value()) {
                 set_error(ERROR_INVALID_ESTIMATE);
@@ -340,6 +415,17 @@ bool Controller::update() {
         }
     }
 
+    // Following-error faults (jams, collisions, encoder slip)
+    if (armed && control_mode >= CONTROL_MODE_POSITION_CONTROL && std::abs(pos_err) > config_.max_pos_error) {
+        set_error(ERROR_POS_FOLLOWING_ERROR);
+        return false;
+    }
+    if (armed && control_mode >= CONTROL_MODE_VELOCITY_CONTROL && vel_estimate.has_value()
+            && std::abs(vel_setpoint_ - *vel_estimate) > config_.max_vel_error) {
+        set_error(ERROR_VEL_FOLLOWING_ERROR);
+        return false;
+    }
+
     // TODO: Change to controller working in torque units
     // Torque per amp gain scheduling (ACIM)
     float vel_gain = config_.vel_gain;
@@ -371,7 +457,7 @@ bool Controller::update() {
     }
 
     float v_err = 0.0f;
-    if (config_.control_mode >= CONTROL_MODE_VELOCITY_CONTROL) {
+    if (control_mode >= CONTROL_MODE_VELOCITY_CONTROL) {
         if (!vel_estimate.has_value()) {
             set_error(ERROR_INVALID_ESTIMATE);
             return false;
@@ -385,7 +471,7 @@ bool Controller::update() {
     }
 
     // Velocity limiting in current mode
-    if (config_.control_mode < CONTROL_MODE_VELOCITY_CONTROL && config_.enable_torque_mode_vel_limit) {
+    if (control_mode < CONTROL_MODE_VELOCITY_CONTROL && config_.enable_torque_mode_vel_limit) {
         if (!vel_estimate.has_value()) {
             set_error(ERROR_INVALID_ESTIMATE);
             return false;
@@ -405,7 +491,7 @@ bool Controller::update() {
     }
 
     // Velocity integrator (behaviour dependent on limiting)
-    if (config_.control_mode < CONTROL_MODE_VELOCITY_CONTROL) {
+    if (control_mode < CONTROL_MODE_VELOCITY_CONTROL) {
         // reset integral if not in use
         vel_integrator_torque_ = 0.0f;
     } else {

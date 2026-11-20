@@ -175,10 +175,15 @@ bool Axis::watchdog_check() {
     if (watchdog_current_value_ > 0) {
         watchdog_current_value_--;
         return true;
-    } else {
-        error_ |= ERROR_WATCHDOG_TIMER_EXPIRED;
-        return false;
     }
+    // DECEL_HOLD needs an armed closed loop and a position estimate; anything else disarms as stock does.
+    if (config_.watchdog_action == WATCHDOG_ACTION_DECEL_HOLD
+            && current_state_ == AXIS_STATE_CLOSED_LOOP_CONTROL && motor_.is_armed_
+            && controller_.enter_timeout()) {
+        return true;
+    }
+    error_ |= ERROR_WATCHDOG_TIMER_EXPIRED;
+    return false;
 }
 
 bool Axis::run_lockin_spin(const LockinConfig_t &lockin_config, bool remain_armed,
@@ -285,6 +290,9 @@ bool Axis::start_closed_loop_control() {
             controller_.set_error(Controller::ERROR_INVALID_LOAD_ENCODER);
             return false;
         }
+
+        // A new closed-loop entry ends a watchdog timeout (the state machine feeds the watchdog first).
+        controller_.timeout_active_ = false;
 
         // To avoid any transient on startup, we intialize the setpoint to be the current position
         controller_.control_mode_updated();

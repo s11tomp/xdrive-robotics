@@ -1,24 +1,17 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: bug
-assignees: ''
-
+about: Something on the board or in the tools doesn't work as documented
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+**What happened, and what did you expect?**
 
-**To Reproduce**
-Steps and configuration necessary to reproduce the behavior.
+**Steps to reproduce** (commands, settings changed, what the motor was doing)
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+**Setup**
+- Board (MKS XDRIVE Mini or another ODrive v3.6 clone), and its `hw_version_*`:
+- Firmware version (`fw_version_*`, or the commit you built):
+- Motor (model, KV, pole pairs) and load:
+- Supply voltage, brake resistor:
+- Host OS and Python version:
 
-**Desktop (please complete the following information):**
- - OS: [e.g. Windows 10]
- - odrivetool Version (`odrivetool --version`)
-
-**Additional context**
-Add any other context about the problem here.
+**Board dump:** attach the `logs/*_dump.json` from `python xdrive/tools/dump_board.py` (it has the config, errors and versions).

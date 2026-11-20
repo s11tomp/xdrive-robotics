@@ -1,3 +1,30 @@
+# Changelog
+
+This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions it builds on.
+
+## xdrive-robotics [1.0.0] - Unreleased
+
+Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0.5.1 firmware resets the board's config.
+
+### Added
+- MKS XDRIVE Mini support: the second DRV8301 is marked not populated (`-DXDRIVE_MINI`).
+- AS5047 frame checks with counters (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`; `encoder.spi_*_count`) and rejection of impossible jumps (`abs_spi_max_jump`).
+- Encoder correction table: `AXIS_STATE_ENCODER_CORRECTION_CALIBRATION` (14), 256 bins, harmonics 1 to 12 (`encoder.config.correction_enabled`, `correction_max_harmonic`).
+- Watchdog decelerate-and-hold (`axis.config.watchdog_action`, `watchdog_decel`, `watchdog_torque_lim`; `controller.timeout_active`).
+- Soft position limits (`controller.config.pos_min`, `pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). Safety faults zero the torque.
+- Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4; `controller.input_kp`, `input_kd`).
+- CAN impedance command and reply (CANSimple ID 0x1E; full scales in `axis.config.can.impedance_*`).
+- Flux braking (`motor.config.flux_brake_start_voltage`, `flux_brake_gain`) and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`).
+- High-rate capture (`odrv.capture`), replacing the hard-wired oscilloscope buffer.
+- Build with plain make (`make -C xdrive`), and host tools for flashing over USB DFU or SWD, configuration and bench tests (`xdrive/tools/`).
+
+### Changed
+- Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
+- `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
+
+### Fixed
+- The SPI arbiter unlinks a finished or failed task before its callback, which could otherwise freeze the board.
+
 
 ## [0.5.6] - Unreleased
 

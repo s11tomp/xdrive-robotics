@@ -11,7 +11,7 @@
 // [0, 2^bits - 1]. Encoding saturates at the range. The ranges are per-axis config
 // (`axis.config.can.impedance_*`) and must match on host and board.
 //
-// Pure functions, no firmware dependencies: the host tests compile this header.
+// Pure functions, no firmware dependencies: xdrive/tools/tests/ compiles this header on the host.
 
 #include <algorithm>
 #include <cmath>

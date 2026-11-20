@@ -15,7 +15,7 @@
 // iq_min/iq_max are the resulting bounds on iq; the controller uses them (one period late) to clamp
 // its torque and stop its velocity integrator from winding up.
 //
-// Pure function, no firmware dependencies: the host tests compile this header.
+// Pure function, no firmware dependencies: xdrive/tools/tests/ compiles this header on the host.
 
 #include <algorithm>
 #include <cmath>

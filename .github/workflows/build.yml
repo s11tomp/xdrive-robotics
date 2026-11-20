@@ -1,0 +1,25 @@
+name: build
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # tools/odrive/version.py reads the version from git describe
+      - name: Install GNU Arm Embedded 10.3-2021.10 and uv
+        run: |
+          curl -sSL https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2 | tar -xj -C "$HOME"
+          python3 -m pip install --user uv
+      - name: Build
+        run: make -C xdrive -j4 TOOLCHAIN="$HOME/gcc-arm-none-eabi-10.3-2021.10/bin/"
+      - name: Host tests
+        run: |
+          python3 -m pip install --user numpy pytest
+          python3 -m pytest -q xdrive/tools/tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: Firmware/build/ODriveFirmware.*

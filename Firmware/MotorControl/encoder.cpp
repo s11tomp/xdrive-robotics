@@ -482,7 +482,7 @@ float Encoder::correction_at(int32_t raw) const {
 bool Encoder::run_correction_calibration() {
     const float start_lock_duration = 1.0f;
     // Work arrays are static: the axis thread's stack is only 2 KB (axis.hpp stack_size_), and two
-    // float[256] locals overflowed it (2026-11-19: froze the scheduler mid-calibration).
+    // float[256] locals overflow it and freeze the scheduler mid-calibration.
     static float s_sum[2][256];
     static uint32_t s_n[2][256];
     static float e[256];

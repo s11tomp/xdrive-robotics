@@ -116,6 +116,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `safety_test.py`, `impedance_test.py`, `regen_test.py`, `capture_test.py` | Bench tests of the added features with PASS/FAIL checks (all but `capture_test.py` move the motor) |
 | `regress.py` | Motor moves. Regression suite compared with a saved baseline, at a fixed rotor angle (`--hold-at`) |
 | `move_to.py` | Motor moves. Turns the rotor to a fractional-turn angle and leaves it IDLE |
+| `demo.py` | Motor moves. A demo for an audience: moves and a sine sweep in a loop (`--loop N`, or until Ctrl-C), or with `--spring [S]` only a spring to twist by hand |
 | `spike_hunt.py`, `brake_check.py`, `profile_loop.py` | Motor moves. Diagnostics: current-measurement glitches, hard braking, control-loop timing |
 | `analyze_*.py` | Offline analysis of the logs |
 | `impedance_frame.py` | Host codec for the CAN impedance command (no I/O) |

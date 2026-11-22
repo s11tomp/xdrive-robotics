@@ -280,6 +280,16 @@ def test_paths_give_plain_values_and_take_json_values(json_bytes: bytes) -> None
         paths.get(board, "axis0.fet_thermistor.temperature")                         # a v0.5.1 name
 
 
+@pytest.mark.parametrize("chunk", [61, 4], ids=["usb", "can"])
+def test_read_buffer_reads_chunks_up_to_the_size(json_bytes: bytes, chunk: int) -> None:
+    board = Board(FakeLink(json_bytes, chunk))
+    assert board.read_buffer(JSON_ENDPOINT, 1000) == json_bytes[:1000]
+    with pytest.raises(Refused, match="ended after"):
+        board.read_buffer(JSON_ENDPOINT, len(json_bytes) + 10)
+    assert board.endpoint_id(odrv.vbus_voltage) == Interface(json_bytes).properties["vbus_voltage"].id
+    assert board.endpoint_id(odrv.clear_errors) == Interface(json_bytes).functions["clear_errors"].id
+
+
 def test_enums_are_strict() -> None:
     assert issubclass(AxisState, enum.Enum) and not issubclass(AxisState, int)
     assert issubclass(AxisError, enum.IntFlag)

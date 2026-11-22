@@ -23,7 +23,7 @@ from xdrive import interface
 from xdrive.errors import InterfaceMismatch, LinkLost, LinkTimeout, Refused
 from xdrive.interface import FORMATS, JSON_ENDPOINT, VERSION_OFFSET, Endpoint, Interface
 from xdrive.link import Link
-from xdrive.model import Call, EndpointRef, Prop, RwProp
+from xdrive.model import Call, EndpointRef, Func, Prop, RwProp
 from xdrive.props import odrv
 
 T = TypeVar("T")
@@ -146,6 +146,25 @@ class Board:
         t_start = time.perf_counter()
         values = tuple(self.get(p) for p in props)
         return Reading(values, t_start, time.perf_counter())
+
+    def endpoint_id(self, p: Prop[Any] | Func[Any]) -> int:
+        """The endpoint ID of a property or function on this board (for capture.add_channel)."""
+        if isinstance(p, Prop):
+            return self._endpoint(p).id
+        fn = self.interface.functions.get(p.path)
+        if fn is None:
+            raise InterfaceMismatch(f"{self.describe()}: the board's firmware has no function {p.path}")
+        return fn.id
+
+    def read_buffer(self, endpoint_id: int, size: int) -> bytes:
+        """`size` bytes of a buffer endpoint (the capture readout), read from offset 0 chunk by chunk."""
+        out = bytearray()
+        while len(out) < size:
+            chunk = self.link.read_buffer(endpoint_id, len(out))
+            if not chunk:
+                raise Refused(f"{self.describe()}: buffer endpoint {endpoint_id} ended after {len(out)} of {size} bytes")
+            out += chunk
+        return bytes(out[:size])
 
     def call(self, c: Call[T]) -> T:
         """Writes the function's inputs, runs it and reads its outputs: None, one value or a tuple."""

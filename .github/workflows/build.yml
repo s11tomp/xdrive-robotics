@@ -27,7 +27,7 @@ jobs:
       - name: Check that the generated files match the interface file
         run: |
           make generate
-          git diff --exit-code -- docs/reference.md docs/cansimple.dbc tools/enums_v056.py
+          git diff --exit-code -- docs/reference.md docs/cansimple.dbc tools/enums_v056.py tools/xdrive/props.py tools/xdrive/enums.py
       - name: Check the firmware reports the tag's version
         if: startsWith(github.ref, 'refs/tags/fw-v')
         run: |

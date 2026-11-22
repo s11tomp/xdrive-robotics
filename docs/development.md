@@ -57,6 +57,7 @@ make clean        # removes build/
 - `docs/reference.md`, the property reference (`tools/gen_reference.py`). It marks the items ODrive v0.5.6 doesn't have, read from the tag `upstream/fw-v0.5.6`.
 - `docs/cansimple.dbc`, the CAN database (`tools/gen_dbc.py`). The message layouts are written out in the generator, following `src/communication/can/can_simple.cpp`; only the enum values come from the interface file, so a new or changed CAN message needs an edit to `gen_dbc.py` as well.
 - `tools/enums_v056.py`, the enum and error-bit values the host tools decode with (`tools/codegen/enums_template.j2`).
+- `tools/xdrive/props.py` and `tools/xdrive/enums.py`, the host library's typed names for every property and function and its enum and error-flag classes (`tools/gen_props.py`). `tools/tests/test_xdrive.py` checks the names against the interface JSON the firmware embeds, produced by the same generator.
 
 The diagrams in `docs/figures/` are hand-written SVG; `python docs/figures/plots.py` redraws the plots (its docstring lists which logs each needs).
 

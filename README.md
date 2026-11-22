@@ -121,8 +121,9 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `spike_hunt.py`, `brake_check.py`, `profile_loop.py` | Motor moves. Diagnostics: current-measurement glitches, hard braking, control-loop timing |
 | `analyze_*.py` | Offline analysis of the logs |
 | `impedance_frame.py` | Host codec for the CAN impedance command (no I/O) |
+| `xdrive/` | The host library: typed access to a board over USB (`from xdrive import usb`; see its docstrings). The tools above still use the `odrive` package and move to it one at a time |
 
-`make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers) and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
+`make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers), mypy on the host library, and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
 
 ## Versioning
 

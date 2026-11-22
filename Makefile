@@ -1,9 +1,11 @@
 # Build the firmware and run the checks, from the repo root (or `make -C <repo>` from anywhere).
 #   all (default)  firmware -> build/firmware.{elf,hex,bin,map}
 #   asm, size      disassembly (build/firmware.asm), section sizes
-#   test           the firmware's unit tests (src/tests, on the host) and the host tools' tests (tools/tests)
-#   generate       regenerates docs/reference.md, docs/cansimple.dbc and tools/enums_v056.py from
-#                  src/odrive-interface.yaml; CI fails when the committed files differ from its output
+#   test           the firmware's unit tests (src/tests, on the host), mypy on the host library (tools/xdrive)
+#                  and the host tools' tests (tools/tests)
+#   generate       regenerates docs/reference.md, docs/cansimple.dbc, tools/enums_v056.py and
+#                  tools/xdrive/{props,enums}.py from src/odrive-interface.yaml; CI fails when the
+#                  committed files differ from its output
 #   clean
 # Variables: TOOLCHAIN (Arm GCC's bin/ directory, with a trailing slash), HOST_CXX (default c++).
 ROOT     := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -19,11 +21,13 @@ test: venv
 	cd $(ROOT)src && $(HOST_CXX) -std=c++17 -O2 -I. -IMotorControl -Ifibre-cpp/include -IDrivers/DRV8301 -Itests/doctest \
 		tests/*.cpp -o ../build/tests/unit_tests
 	$(ROOT)build/tests/unit_tests
+	cd $(ROOT) && $(PYTHON) -m mypy tools/xdrive tools/tests/test_xdrive.py
 	cd $(ROOT) && $(PYTHON) -m pytest -q tools/tests
 
 generate: venv
 	cd $(ROOT) && $(PYTHON) tools/gen_reference.py
 	cd $(ROOT) && $(PYTHON) tools/gen_dbc.py
+	cd $(ROOT) && $(PYTHON) tools/gen_props.py
 	cd $(ROOT)src && $(PYTHON) -B ../tools/codegen/interface_generator.py --definitions odrive-interface.yaml \
 		--template ../tools/codegen/enums_template.j2 --output ../tools/enums_v056.py
 

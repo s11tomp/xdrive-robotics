@@ -21,14 +21,16 @@ import math
 import pathlib
 import sys
 
-from dump_board import connect
+from xdrive import usb
+from xdrive.board import Board
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
 N = 256
 
 
-def harmonics(t, hmax):
+def harmonics(t: list[float], hmax: int) -> list[tuple[int, float, float]]:
     out = []
     for h in range(1, hmax + 1):
         c = sum(v * math.cos(2 * math.pi * h * (k + 0.5) / N) for k, v in enumerate(t)) * 2 / N
@@ -37,17 +39,17 @@ def harmonics(t, hmax):
     return out
 
 
-def smooth(t, hmax):
+def smooth(t: list[float], hmax: int) -> list[float]:
     hs = harmonics(t, hmax)
     return [sum(c * math.cos(2 * math.pi * h * (k + 0.5) / N) + s * math.sin(2 * math.pi * h * (k + 0.5) / N)
                 for h, c, s in hs) for k in range(N)]
 
 
-def rms(x):
+def rms(x: list[float]) -> float:
     return math.sqrt(sum(v * v for v in x) / len(x))
 
 
-def show(t, cpr):
+def show(t: list[float], cpr: int) -> None:
     deg = 360.0 / cpr
     hs = harmonics(t, 64)
     top = sorted(hs, key=lambda x: -math.hypot(x[1], x[2]))[:8]
@@ -57,7 +59,11 @@ def show(t, cpr):
     print("largest harmonics: " + ", ".join(f"{h}x {math.hypot(c, s):.1f}" for h, c, s in top))
 
 
-def main():
+def read_table(board: Board) -> list[float]:
+    return [board.call(odrv.axis0.encoder.get_correction(index=i)) for i in range(N)]
+
+
+def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--show", action="store_true")
     ap.add_argument("--save-json")
@@ -65,23 +71,26 @@ def main():
     ap.add_argument("--smooth", type=int, metavar="H")
     args = ap.parse_args()
 
-    dev = connect(timeout=10)
-    enc = dev.axis0.encoder
-    cpr = enc.config.cpr
-    serial = format(dev.serial_number, "X")
-    table = [enc.get_correction(i) for i in range(N)]
-    print(f"board {serial}: correction_enabled = {enc.config.correction_enabled}")
+    new: list[float] | None = None
+    if args.load_json:
+        new = json.loads(pathlib.Path(args.load_json).read_text())["table_counts"]
+        if new is None or len(new) != N:
+            sys.exit(f"{args.load_json}: table_counts must have {N} entries")
+
+    board = usb.connect()
+    enc = odrv.axis0.encoder
+    cpr = board.get(enc.config.cpr)
+    serial = format(board.get(odrv.serial_number), "X")
+    table = read_table(board)
+    print(f"board {serial}: correction_enabled = {board.get(enc.config.correction_enabled)}")
     show(table, cpr)
-    rec = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "correction_table",
+    rec: dict[str, object] = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "correction_table",
            "serial": serial, "argv": sys.argv[1:]}
 
     if args.save_json:
         pathlib.Path(args.save_json).write_text(json.dumps({"serial": serial, "table_counts": table}, indent=2) + "\n")
         print(f"saved -> {args.save_json}")
-    new = None
-    if args.load_json:
-        new = json.loads(pathlib.Path(args.load_json).read_text())["table_counts"]
-        assert len(new) == N
+    LOGS.mkdir(exist_ok=True)
     if args.smooth:
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         before = LOGS / f"{stamp}_{serial}_correction-table-before-smooth.json"
@@ -91,15 +100,16 @@ def main():
         print(f"\nsmoothed to harmonics 1..{args.smooth} (original kept in {before.relative_to(WORKDIR)}):")
     if new is not None:
         for i, v in enumerate(new):
-            enc.set_correction(i, float(v))
-        back = [enc.get_correction(i) for i in range(N)]
-        assert max(abs(a - b) for a, b in zip(back, new)) < 1e-3, "readback mismatch"
+            board.call(enc.set_correction(index=i, val=float(v)))
+        back = read_table(board)
+        if max(abs(a - b) for a, b in zip(back, new)) >= 1e-3:
+            sys.exit("the table read back differs from the one written")
         show(back, cpr)
         print("written to the board (RAM only).")
         rec["written_rms_counts"] = rms(back)
-    LOGS.mkdir(exist_ok=True)
     with (LOGS / "actions.jsonl").open("a") as f:
         f.write(json.dumps(rec) + "\n")
+    board.close()
     return 0
 
 

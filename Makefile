@@ -2,7 +2,7 @@
 #   all (default)  firmware -> build/firmware.{elf,hex,bin,map}
 #   asm, size      disassembly (build/firmware.asm), section sizes
 #   test           the firmware's unit tests (src/tests, on the host), mypy on the host library (tools/xdrive)
-#                  and the host tools' tests (tools/tests)
+#                  and the tools that use it, and the host tools' tests (tools/tests)
 #   generate       regenerates docs/reference.md, docs/cansimple.dbc, tools/enums_v056.py and
 #                  tools/xdrive/{props,enums}.py from src/odrive-interface.yaml; CI fails when the
 #                  committed files differ from its output
@@ -21,7 +21,7 @@ test: venv
 	cd $(ROOT)src && $(HOST_CXX) -std=c++17 -O2 -I. -IMotorControl -Ifibre-cpp/include -IDrivers/DRV8301 -Itests/doctest \
 		tests/*.cpp -o ../build/tests/unit_tests
 	$(ROOT)build/tests/unit_tests
-	cd $(ROOT) && $(PYTHON) -m mypy tools/xdrive tools/tests/test_xdrive.py
+	cd $(ROOT) && $(PYTHON) -m mypy tools/xdrive tools/tests/test_xdrive.py tools/idle.py tools/correction_table.py
 	cd $(ROOT) && $(PYTHON) -m pytest -q tools/tests
 
 generate: venv

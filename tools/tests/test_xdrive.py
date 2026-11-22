@@ -24,9 +24,9 @@ import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from xdrive import interface  # noqa: E402
+from xdrive import interface, report  # noqa: E402
 from xdrive.board import Board, load_interface  # noqa: E402
-from xdrive.enums import AxisError, AxisState, ControlMode  # noqa: E402
+from xdrive.enums import AxisError, AxisState, ControlMode, MotorError  # noqa: E402
 from xdrive.errors import InterfaceMismatch, LinkLost, LinkTimeout, Refused  # noqa: E402
 from xdrive.interface import FORMATS, JSON_ENDPOINT, VERSION_OFFSET, Interface  # noqa: E402
 from xdrive.model import Call, EndpointRef, Func, Prop, RwProp  # noqa: E402
@@ -246,6 +246,18 @@ def test_save_lifecycle(json_bytes: bytes) -> None:
     with pytest.raises(LinkLost, match="without having rebooted"):
         link.reconnect = lambda timeout: None  # type: ignore[method-assign]
         board.reboot()
+
+
+def test_report_decodes_every_bit(json_bytes: bytes) -> None:
+    link = FakeLink(json_bytes)
+    link.put("axis0.motor.error", MotorError.UNBALANCED_PHASES.value | MotorError.PHASE_RESISTANCE_OUT_OF_RANGE.value)
+    link.put("axis0.error", 0x41 | 0x8000_0000)    # bit 31 has no AxisError name
+    errs = report.errors(Board(link))
+    assert report.jsonable(errs["motor"]) == {"hex": "0x800000001",
+                                              "flags": ["PHASE_RESISTANCE_OUT_OF_RANGE", "UNBALANCED_PHASES"]}
+    assert report.line(errs["axis"]) == "0x80000041 INVALID_STATE | MOTOR_FAILED | unknown 0x80000000"
+    assert report.jsonable(errs["axis"])["unknown_bits"] == "0x80000000"
+    assert report.line(errs["encoder"]) == "0x00000000"
 
 
 def test_enums_are_strict() -> None:

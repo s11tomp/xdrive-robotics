@@ -16,7 +16,8 @@ HOST_CXX ?= c++
 
 # Host tools on the xdrive library, type-checked by `make test` (mypy.ini relaxes annotations for the bench tools).
 XDRIVE_TOOLS = idle.py correction_table.py brake_check.py calibrate.py move_to.py profile_loop.py reboot_watch.py \
-	spike_hunt.py usb_flash.py swd_flash.py capture.py capture_test.py
+	spike_hunt.py usb_flash.py swd_flash.py capture.py capture_test.py move_test.py sample.py hold_ab.py disturb_test.py \
+	safety_test.py impedance_test.py regen_test.py demo.py
 all asm size clean: venv
 	$(MAKE) -C $(ROOT)src PYTHON=$(PYTHON) $@
 

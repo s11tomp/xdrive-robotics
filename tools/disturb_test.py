@@ -25,13 +25,12 @@ import sys
 import time
 
 import numpy as np
-import odrive
-from odrive.enums import (AXIS_STATE_CLOSED_LOOP_CONTROL, AXIS_STATE_IDLE,
-                          CONTROL_MODE_POSITION_CONTROL, INPUT_MODE_PASSTHROUGH)
 
-from dump_board import decode_bitmask, connect
-from move_test import FIELDS, IX, SETTINGS, Abort, Recorder
-from sample import resolve
+from move_test import CLOSED_LOOP, FIELDS, IX, SETTINGS, Abort, Recorder, error_problems
+from xdrive import paths, report, usb
+from xdrive.enums import AxisState, ControlMode, InputMode
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -69,27 +68,21 @@ def main():
     if not 0 < abs(args.torque) <= 0.5:
         ap.error("--torque must be within (0, 0.5] Nm")
 
-    dev = connect(timeout=10)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        b = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    ax = dev.axis0
-    serial = format(dev.serial_number, "X")
+    ax = odrv.axis0
+    serial = format(b.get(odrv.serial_number), "X")
     problems = []
-    if ax.current_state != AXIS_STATE_IDLE:
-        problems.append(f"axis not IDLE (state {ax.current_state})")
-    if not (ax.motor.is_calibrated and ax.encoder.is_ready):
+    if (state := b.get(ax.current_state)) is not AxisState.IDLE:
+        problems.append(f"axis not IDLE (state {state.name})")
+    if not (b.get(ax.motor.is_calibrated) and b.get(ax.encoder.is_ready)):
         problems.append("motor/encoder not ready")
-    if ax.controller.config.control_mode != CONTROL_MODE_POSITION_CONTROL:
+    if b.get(ax.controller.config.control_mode) is not ControlMode.POSITION_CONTROL:
         problems.append("control_mode is not POSITION")
-    for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                         ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")]:
-        v = resolve(dev, name).get_value()
-        if v:
-            problems.append(f"{name} = {decode_bitmask(v, prefix)}")
-    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) < (0, 5, 2) and dev.axis1.error & 0x8:
-        problems.append("axis1 has CURRENT_MEASUREMENT_TIMEOUT: PWM/ADC timing disrupted "
-                        "(fw 0.5.1 after save_configuration()); reboot first (reboot_watch.py)")
+    problems += error_problems(b)
     if problems:
         print("Not starting:\n  " + "\n  ".join(problems))
         return 2
@@ -99,37 +92,35 @@ def main():
     for opt, path in SETTINGS.items():
         val = getattr(args, opt)
         if val is not None:
-            prop = resolve(dev, path)
-            changed[path] = prop.get_value()
-            prop.set_value(val)
-    im = resolve(dev, "axis0.controller.config.input_mode")
-    changed["axis0.controller.config.input_mode"] = im.get_value()
-    ax.controller.input_torque = 0.0
-    ax.controller.input_vel = 0.0
-    im.set_value(INPUT_MODE_PASSTHROUGH)
-    applied = {p: resolve(dev, p).get_value() for p in changed}
-    gains = {k: resolve(dev, f"axis0.controller.config.{k}").get_value()
+            changed[path] = paths.get(b, path)
+            paths.set(b, path, val)
+    changed["axis0.controller.config.input_mode"] = paths.get(b, "axis0.controller.config.input_mode")
+    b.set(ax.controller.input_torque, 0.0)
+    b.set(ax.controller.input_vel, 0.0)
+    b.set(ax.controller.config.input_mode, InputMode.PASSTHROUGH)
+    applied = {p: paths.get(b, p) for p in changed}
+    gains = {k: paths.get(b, f"axis0.controller.config.{k}")
              for k in ("pos_gain", "vel_gain", "vel_integrator_gain", "inertia")}
     start_stamp = datetime.datetime.now().astimezone()
 
-    rec = Recorder(dev)
+    rec = Recorder(b)
     rec.max_vel = args.max_vel
     steps, abort_reason, final_errors, hold_pos = [], None, {}, None
     plan = [("hold", 0.0, 1.0), (f"torque {args.torque:+g}", args.torque, args.step_s), ("torque 0", 0.0, args.step_s),
             (f"torque {-args.torque:+g}", -args.torque, args.step_s), ("torque 0 (end)", 0.0, args.step_s)]
     try:
         rec.event = "closed_loop_request"
-        ax.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL  # firmware sets input_pos = pos_estimate on entry
+        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)  # firmware sets input_pos = pos_estimate on entry
         deadline = time.monotonic() + 1.0
-        while rec.sample()[1 + IX["axis0.current_state"]] != AXIS_STATE_CLOSED_LOOP_CONTROL:
+        while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
             if time.monotonic() > deadline:
                 raise Abort("did not enter closed loop within 1 s")
         rec.expect_closed_loop = True
-        hold_pos = ax.controller.input_pos
+        hold_pos = b.get(ax.controller.input_pos)
         for name, torque, dur in plan:
             rec.event = name
             i0 = len(rec.rows)
-            ax.controller.input_torque = torque
+            b.set(ax.controller.input_torque, torque)
             rec.run_for(dur)
             m = step_metrics(rec.rows[i0:], hold_pos, args.band)
             steps.append({"step": name, "torque_Nm": torque, **m})
@@ -142,17 +133,15 @@ def main():
         abort_reason = "Ctrl-C"
     finally:
         try:
-            ax.requested_state = AXIS_STATE_IDLE
+            b.set(ax.requested_state, AxisState.IDLE)
         except Exception as ex:
             print(f"!!! Could not command IDLE ({ex!r}). Press OUT on the PSU.")
         try:
             time.sleep(0.1)
-            ax.controller.input_torque = 0.0
-            for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                                 ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")]:
-                final_errors[name] = decode_bitmask(resolve(dev, name).get_value(), prefix)
+            b.set(ax.controller.input_torque, 0.0)
+            final_errors = {name: report.jsonable(err) for name, err in report.errors(b).items()}
             for path, old in changed.items():
-                resolve(dev, path).set_value(old)
+                paths.set(b, path, old)
         except Exception as ex:
             print(f"Post-run read/restore failed: {ex!r}")
 

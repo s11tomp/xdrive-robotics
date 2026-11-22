@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only high-rate sampler for axis0 (ODrive fw v0.5.1 / MKS XDRIVE Mini).
+"""Read-only high-rate sampler for axis0 (MKS XDRIVE Mini, this firmware).
 
 Polls a fixed set of live values over USB as fast as it can for --duration
 seconds, writes a CSV to logs/, and prints summary statistics. Only reads
@@ -17,7 +17,9 @@ import statistics as st
 import sys
 import time
 
-import odrive
+from xdrive import paths, usb
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -41,7 +43,7 @@ FIELDS = [
     "axis0.controller.pos_setpoint",
     "axis0.controller.vel_setpoint",
     "axis0.controller.vel_integrator_torque",
-    "axis0.fet_thermistor.temperature",
+    "axis0.motor.fet_thermistor.temperature",
 ]
 
 
@@ -91,16 +93,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--duration", type=float, default=10.0)
     ap.add_argument("--label", default="sample")
-    ap.add_argument("--timeout", type=float, default=20.0)
     args = ap.parse_args()
 
-    from dump_board import connect  # here, not at the top: dump_board imports this module
-    dev = connect(timeout=args.timeout)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        b = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    props = [resolve(dev, f) for f in FIELDS]
-    serial = format(dev.serial_number, "X")
+    props = [paths.prop(f) for f in FIELDS]
+    serial = format(b.get(odrv.serial_number), "X")
 
     stamp = datetime.datetime.now().astimezone()
     LOGS.mkdir(exist_ok=True)
@@ -109,7 +110,8 @@ def main():
     rows = []
     t0 = time.monotonic()
     while (t := time.monotonic() - t0) < args.duration:
-        rows.append([t] + [p.get_value() for p in props])
+        rows.append([t] + paths.read(b, props))
+    b.close()
 
     with path.open("w", newline="") as f:
         w = csv.writer(f)
@@ -123,7 +125,7 @@ def main():
     for name in ["vbus_voltage", "ibus", "axis0.motor.current_control.Iq_setpoint",
                  "axis0.motor.current_control.Iq_measured", "axis0.motor.current_control.Id_measured",
                  "axis0.encoder.vel_estimate", "axis0.controller.vel_integrator_torque",
-                 "axis0.fet_thermistor.temperature"]:
+                 "axis0.motor.fet_thermistor.temperature"]:
         s = stats(col[name])
         print(f"  {name:45s} mean {s['mean']:+9.4f}  std {s['std']:8.4f}  min {s['min']:+9.4f}  max {s['max']:+9.4f}")
     pos_counts = [p * 16384 for p in col["axis0.encoder.pos_estimate"]]

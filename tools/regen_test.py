@@ -29,7 +29,8 @@ import time
 import numpy as np
 
 from capture import RISING, capture, read, save, setup, wait_done
-from dump_board import connect
+from xdrive import usb
+from xdrive.props import odrv
 from safety_test import CLOSED_LOOP, IDLE, LOGS, POS, WORKDIR, SETTINGS, TRAP, Bench, Unexpected
 
 ACCEL = 30.0      # turn/s^2
@@ -46,35 +47,34 @@ REGEN_SETTINGS = SETTINGS + [
 
 def move(b, vel, label, results, accel=ACCEL):
     """Out-and-back trap move at `vel`; the out move is captured. Returns the metrics of the out move."""
-    ax = b.ax
     b.set("axis0.trap_traj.config.vel_limit", vel)
     b.set("axis0.trap_traj.config.accel_limit", accel)
     b.set("axis0.trap_traj.config.decel_limit", accel)
     turns = vel * vel / accel + 0.3 * vel  # accelerate, cruise 0.3 s, decelerate
-    start = ax.encoder.pos_estimate
+    start = b.get("axis0.encoder.pos_estimate")
     capacity = 8192 // len(CHANNELS)
-    fields, props = setup(b.dev, CHANNELS, decimation=10, trigger=("axis0.encoder.vel_estimate", RISING, 0.5),
+    fields, types = setup(b.board, CHANNELS, decimation=10, trigger=("axis0.encoder.vel_estimate", RISING, 0.5),
                           post=capacity - 40)
     out = {"label": label, "vel": vel, "turns": round(turns, 2)}
     for target in (start + turns, start):
         b.event = f"{label}_to_{target - start:+.2f}"
-        ax.controller.input_pos = target
+        b.set("axis0.controller.input_pos", target)
         b.run(2 * vel / accel + 0.3 + 3.0,
               until=lambda r: b.v(r, "axis0.controller.trajectory_done") and abs(b.v(r, "axis0.encoder.pos_estimate") - target) < 0.01)
         b.run(0.3)
-        if ax.current_state != CLOSED_LOOP:
-            out["tripped"] = {k: hex(v) for k, v in b.errors().items()} | {"odrv": hex(b.dev.error)}
+        if b.get("axis0.current_state") != CLOSED_LOOP:
+            out["tripped"] = b.errors() | {"odrv": hex(b.get("error"))}
             break
         if target != start:
-            out["final_error"] = round(ax.encoder.pos_estimate - target, 4)
+            out["final_error"] = round(b.get("axis0.encoder.pos_estimate") - target, 4)
     try:
-        wait_done(b.dev, 2.0)
+        wait_done(b.board, 2.0)
     except Exception as ex:  # noqa: BLE001 - a trip before the trigger leaves nothing to analyze
         out["capture"] = repr(ex)
         results.append(out)
         print(f"  {label} {vel:g} turn/s: {out}")
         return out
-    t, d, meta = read(b.dev, fields, props)
+    t, d, meta = read(b.board, fields, types)
     out["csv"] = str(save(t, d, meta, b.serial, f"regen-{label}-{vel:g}").relative_to(WORKDIR))
     dt = meta["period_s"]
     vbus = d["vbus_voltage"].astype(float)
@@ -110,10 +110,10 @@ def test_regen(b):
     b.set("axis0.trap_traj.config.accel_limit", ACCEL)
     b.set("axis0.trap_traj.config.decel_limit", ACCEL)
     b.set("config.dc_bus_overvoltage_trip_level", OV_TRIP)
-    b.dev.clear_errors()
-    b.ax.controller.input_pos = b.ax.encoder.pos_estimate
+    b.clear_errors()
+    b.set("axis0.controller.input_pos", b.get("axis0.encoder.pos_estimate"))
     b.closed_loop(POS, TRAP)
-    results = []
+    results: list[dict[str, object]] = []
 
     print("brake")
     m = move(b, 10.0, "brake", results)
@@ -128,14 +128,14 @@ def test_regen(b):
             f"mean I_bus {hard['ibus_accel']:+.3f} A accelerating, {hard['ibus_stop']:+.3f} A stopping, vbus rise {hard['vbus_rise']} V")
 
     print("flux")  # the stand's rotor regenerates too little to lift the bus, so the start sits below it
-    vbus = float(np.median([b.dev.vbus_voltage for _ in range(20)]))
+    vbus = float(np.median([b.get("vbus_voltage") for _ in range(20)]))
     start, gain = round(vbus - 1.0, 2), 10.0
-    t, d, meta = capture(b.dev, CHANNELS, decimation=4)
+    t, d, meta = capture(b.board, CHANNELS, decimation=4)
     before = {k: float(np.mean(d[k])) for k in ("axis0.motor.I_bus", "axis0.motor.current_control.Id_measured")}
     b.set("axis0.motor.config.flux_brake_gain", gain)
     b.set("axis0.motor.config.flux_brake_start_voltage", start)
     b.run(0.3)
-    t, d, meta = capture(b.dev, CHANNELS, decimation=4)
+    t, d, meta = capture(b.board, CHANNELS, decimation=4)
     b.set("axis0.motor.config.flux_brake_start_voltage", float("inf"))
     save(t, d, meta, b.serial, "regen-flux-hold")
     vb, i_d, ibus = (float(np.mean(d[k])) for k in ("vbus_voltage", "axis0.motor.current_control.Id_measured", "axis0.motor.I_bus"))
@@ -143,7 +143,7 @@ def test_regen(b):
     want_dibus = 1.5 * b.get("axis0.motor.config.phase_resistance") * (i_d ** 2 - before["axis0.motor.current_control.Id_measured"] ** 2) / vb
     b.check("flux braking: Id = -gain * (vbus - start), and its copper loss shows in I_bus",
             abs(i_d - want_id) < 0.1 * abs(want_id) and abs((ibus - before["axis0.motor.I_bus"]) - want_dibus) < 0.3 * want_dibus
-            and b.ax.current_state == CLOSED_LOOP,
+            and b.get("axis0.current_state") == CLOSED_LOOP,
             f"Id {i_d:+.2f} A vs {want_id:+.2f}; I_bus {before['axis0.motor.I_bus']:+.3f} -> {ibus:+.3f} A "
             f"(+{ibus - before['axis0.motor.I_bus']:.3f} vs +{want_dibus:.3f} predicted)")
 
@@ -177,19 +177,19 @@ def test_regen(b):
             f"mean I_bus accelerating {m['ibus_accel']:+.3f} A vs {hard['ibus_accel']:+.3f} A uncapped; "
             f"final error {m.get('final_error')} turn")
     b.set("axis0.motor.config.I_bus_soft_max", float("inf"))
-    b.ax.requested_state = IDLE
+    b.set("axis0.requested_state", IDLE)
     return results
 
 
 def main():
-    dev = connect(timeout=10)
-    serial = format(dev.serial_number, "X")
+    board = usb.connect()
+    serial = format(board.get(odrv.serial_number), "X")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    b = Bench(dev, stamp, serial, prefix="regen")
+    b = Bench(board, stamp, serial, prefix="regen")
     saved = {p: b.get(p) for p in REGEN_SETTINGS}
     results, logs, abort = [], [], None
     try:
-        b.ax.requested_state = IDLE
+        b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
         results = test_regen(b)
         logs.append(str(b.log("test").relative_to(WORKDIR)))
@@ -198,14 +198,14 @@ def main():
         print(f"ABORT: {abort}")
     finally:
         try:
-            b.ax.requested_state = IDLE
+            b.set("axis0.requested_state", IDLE)
             t = time.monotonic()
-            while abs(b.ax.encoder.vel_estimate) > 0.5 and time.monotonic() - t < 20:
+            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
                 time.sleep(0.05)
             for p, val in saved.items():
                 b.set(p, val)
-            dev.capture.clear_channels()
-            dev.clear_errors()
+            board.call(odrv.capture.clear_channels())
+            b.clear_errors()
             if b.rows:
                 logs.append(str(b.log("abort").relative_to(WORKDIR)))
         except Exception as ex:  # USB gone: the only stop left is the PSU

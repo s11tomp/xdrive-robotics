@@ -21,12 +21,12 @@ import sys
 import time
 
 import numpy as np
-import odrive
-from odrive.enums import AXIS_STATE_CLOSED_LOOP_CONTROL, AXIS_STATE_IDLE
 
-from dump_board import decode_bitmask, connect
-from move_test import FIELDS, IX, SETTINGS, Abort, Recorder
-from sample import resolve
+from move_test import CLOSED_LOOP, FIELDS, IX, SETTINGS, Abort, Recorder, error_problems
+from xdrive import paths, usb
+from xdrive.enums import AxisState
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -64,45 +64,40 @@ def main():
     args = ap.parse_args()
     variants = [parse_variant(v) for v in args.variant]
 
-    dev = connect(timeout=10)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        b = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    ax = dev.axis0
-    serial = format(dev.serial_number, "X")
+    ax = odrv.axis0
+    serial = format(b.get(odrv.serial_number), "X")
     problems = []
-    if not (ax.motor.is_calibrated and ax.encoder.is_ready):
+    if not (b.get(ax.motor.is_calibrated) and b.get(ax.encoder.is_ready)):
         problems.append("motor/encoder not ready")
-    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) < (0, 5, 2) and dev.axis1.error & 0x8:
-        problems.append("axis1 CURRENT_MEASUREMENT_TIMEOUT: reboot first (fw 0.5.1 after save_configuration())")
-    for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                         ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")]:
-        v = resolve(dev, name).get_value()
-        if v:
-            problems.append(f"{name} = {decode_bitmask(v, prefix)}")
+    problems += error_problems(b)
     if problems:
         print("Not starting:\n  " + "\n  ".join(problems))
         return 2
 
     touched = {SETTINGS[k] for _, s in variants for k in s}
-    original = {p: resolve(dev, p).get_value() for p in touched}
+    original = {p: paths.get(b, p) for p in touched}
     start_stamp = datetime.datetime.now().astimezone()
-    rec = Recorder(dev)
+    rec = Recorder(b)
     rec.max_vel = 1.0  # holding only: any real motion is a fault
     results, abort_reason, t0 = [], None, time.monotonic()
     try:
         for label, settings in variants:
             rec.expect_closed_loop = False
-            ax.requested_state = AXIS_STATE_IDLE
+            b.set(ax.requested_state, AxisState.IDLE)
             rec.run_for(0.3)
             for p, v in original.items():          # start each variant from the original values
-                resolve(dev, p).set_value(v)
+                paths.set(b, p, v)
             for k, v in settings.items():
-                resolve(dev, SETTINGS[k]).set_value(v)
+                paths.set(b, SETTINGS[k], v)
             rec.event = f"enter {label}"
-            ax.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+            b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
             deadline = time.monotonic() + 1.0
-            while rec.sample()[1 + IX["axis0.current_state"]] != AXIS_STATE_CLOSED_LOOP_CONTROL:
+            while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
                 if time.monotonic() > deadline:
                     raise Abort("did not enter closed loop within 1 s")
             rec.expect_closed_loop = True
@@ -122,12 +117,12 @@ def main():
         abort_reason = "Ctrl-C"
     finally:
         try:
-            ax.requested_state = AXIS_STATE_IDLE
+            b.set(ax.requested_state, AxisState.IDLE)
         except Exception as ex:
             print(f"!!! Could not command IDLE ({ex!r}). Press OUT on the PSU.")
         try:
             for p, v in original.items():
-                resolve(dev, p).set_value(v)
+                paths.set(b, p, v)
         except Exception as ex:
             print(f"Restore failed: {ex!r}")
 

@@ -26,9 +26,10 @@ import pathlib
 import sys
 import time
 
-from dump_board import connect, decode_bitmask
 from move_test import FIELDS as MOVE_FIELDS
-from sample import resolve
+from xdrive import paths, report, usb
+from xdrive.enums import AxisError
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -56,17 +57,17 @@ class Unexpected(Exception):
 
 
 class Bench:
-    def __init__(self, dev, stamp, serial, prefix="safety"):
-        self.dev, self.ax = dev, dev.axis0
+    def __init__(self, board, stamp, serial, prefix="safety"):
+        self.board = board
         self.prefix = prefix
-        self.props = [resolve(dev, f) for f in FIELDS]
+        self.props = [paths.prop(f) for f in FIELDS]
         self.stamp, self.serial = stamp, serial
         self.rows, self.event, self.t0 = [], "", time.monotonic()
         self.checks = []
 
     # --- sampling -------------------------------------------------------------------------------
     def sample(self):
-        row = [time.monotonic() - self.t0] + [p.get_value() for p in self.props] + [self.event]
+        row = [time.monotonic() - self.t0] + paths.read(self.board, self.props) + [self.event]
         self.event = ""
         self.rows.append(row)
         if abs(row[1 + IX["axis0.encoder.vel_estimate"]]) > RUNAWAY:
@@ -81,7 +82,7 @@ class Bench:
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             if feed:
-                self.ax.watchdog_feed()
+                self.feed()
             row = self.sample()
             if until and until(row):
                 return row
@@ -102,37 +103,44 @@ class Bench:
 
     # --- board helpers --------------------------------------------------------------------------
     def set(self, path, value):
-        resolve(self.dev, path).set_value(value)
+        """Writes a property by path; value as plain JSON (an int for an enum)."""
+        paths.set(self.board, path, value)
 
     def get(self, path):
-        return resolve(self.dev, path).get_value()
+        """Reads a property by path as a plain value (an enum or flag as its int)."""
+        return paths.get(self.board, path)
+
+    def feed(self):
+        self.board.call(odrv.axis0.watchdog_feed())
+
+    def clear_errors(self):
+        self.board.call(odrv.clear_errors())
 
     def errors(self):
-        return {"axis": self.ax.error, "motor": self.ax.motor.error, "encoder": self.ax.encoder.error,
-                "controller": self.ax.controller.error}
+        return {k: f"{int(v):#x}" for k, v in report.errors(self.board).items()}
 
     def controller_flags(self):
-        return decode_bitmask(self.ax.controller.error, "CONTROLLER_ERROR_")["flags"]
+        return report.flag_names(self.board.get(odrv.axis0.controller.error))
 
     def idle_and_settle(self):
         """IDLE, wait for the rotor to coast below 0.5 turn/s, then clear errors."""
-        self.ax.requested_state = IDLE
+        self.set("axis0.requested_state", IDLE)
         t = time.monotonic()
-        while abs(self.ax.encoder.vel_estimate) > 0.5 and time.monotonic() - t < 20:
+        while abs(self.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
             self.sample()
-        self.dev.clear_errors()
+        self.clear_errors()
 
     def closed_loop(self, control_mode, input_mode):
         self.set("axis0.controller.config.control_mode", control_mode)
         self.set("axis0.controller.config.input_mode", input_mode)
         self.event = "closed_loop"
         # An enabled watchdog also counts down in IDLE and latches its error there: feed, then clear.
-        self.ax.watchdog_feed()
-        self.dev.clear_errors()
-        self.ax.requested_state = CLOSED_LOOP
+        self.feed()
+        self.clear_errors()
+        self.set("axis0.requested_state", CLOSED_LOOP)
         self.run(0.4, feed=True)
-        if self.ax.current_state != CLOSED_LOOP:
-            raise Unexpected(f"did not enter closed loop: state {self.ax.current_state}, errors {self.errors()}")
+        if self.get("axis0.current_state") != CLOSED_LOOP:
+            raise Unexpected(f"did not enter closed loop: state {self.get('axis0.current_state')}, errors {self.errors()}")
 
 
 def test_watchdog(b):
@@ -145,8 +153,8 @@ def test_watchdog(b):
     b.event = "stop_feeding"
     row = b.run(1.0, until=lambda r: b.v(r, "axis0.current_state") != CLOSED_LOOP)
     b.check("DISARM disarms with WATCHDOG_TIMER_EXPIRED",
-            row is not None and "AXIS_ERROR_WATCHDOG_TIMER_EXPIRED" in decode_bitmask(b.ax.error, "AXIS_ERROR_")["flags"],
-            f"state {b.ax.current_state}, axis error {b.ax.error:#x}")
+            row is not None and AxisError.WATCHDOG_TIMER_EXPIRED in b.board.get(odrv.axis0.error),
+            f"state {b.get('axis0.current_state')}, axis error {b.get('axis0.error'):#x}")
     b.idle_and_settle()
 
     for cap in (math.inf, 0.1):
@@ -158,7 +166,7 @@ def test_watchdog(b):
         b.set("axis0.trap_traj.config.accel_limit", 10.0)
         b.set("axis0.trap_traj.config.decel_limit", 10.0)
         b.closed_loop(POS, TRAP)
-        b.ax.controller.input_pos = b.ax.encoder.pos_estimate + 20.0
+        b.set("axis0.controller.input_pos", b.get("axis0.encoder.pos_estimate") + 20.0)
         b.event = "move"
         b.run(1.3, feed=True)                      # 0.5 s ramp + 0.8 s cruise at 5 turn/s
         b.event = "stop_feeding"
@@ -191,24 +199,24 @@ def test_watchdog(b):
             tq = max(abs(b.v(r, "axis0.motor.current_control.Iq_setpoint")) for r in dec) * b.get("axis0.motor.config.torque_constant")
             b.check("DECEL_HOLD torque stays under watchdog_torque_lim", tq <= 0.1 + 1e-3, f"peak {tq:.3f} N·m")
         # Inputs ignored during the timeout.
-        hold = b.ax.encoder.pos_estimate
-        b.ax.controller.input_pos = hold + 3.0
+        hold = b.get("axis0.encoder.pos_estimate")
+        b.set("axis0.controller.input_pos", hold + 3.0)
         b.event = "input_during_timeout"
         b.run(0.6)
-        moved = abs(b.ax.encoder.pos_estimate - hold)
+        moved = abs(b.get("axis0.encoder.pos_estimate") - hold)
         b.check(f"DECEL_HOLD ({tag}) ignores input_pos", moved < 0.01, f"moved {moved:.4f} turn")
         # Resume: feed, clear_errors -> timeout ends, inputs at the hold position, no jump.
-        b.ax.watchdog_feed()
-        b.dev.clear_errors()
+        b.feed()
+        b.clear_errors()
         b.event = "cleared"
         b.run(0.6, feed=True)
-        moved = abs(b.ax.encoder.pos_estimate - hold)
+        moved = abs(b.get("axis0.encoder.pos_estimate") - hold)
         b.check(f"DECEL_HOLD ({tag}) resumes without a jump",
-                not b.ax.controller.timeout_active and b.ax.current_state == CLOSED_LOOP and moved < 0.01
-                and abs(b.ax.controller.input_pos - hold) < 0.02,
-                f"timeout_active {b.ax.controller.timeout_active}, moved {moved:.4f} turn, "
-                f"input_pos - hold {b.ax.controller.input_pos - hold:+.4f}")
-        b.ax.requested_state = IDLE
+                not b.get("axis0.controller.timeout_active") and b.get("axis0.current_state") == CLOSED_LOOP and moved < 0.01
+                and abs(b.get("axis0.controller.input_pos") - hold) < 0.02,
+                f"timeout_active {b.get('axis0.controller.timeout_active')}, moved {moved:.4f} turn, "
+                f"input_pos - hold {b.get('axis0.controller.input_pos') - hold:+.4f}")
+        b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
     b.set("axis0.config.enable_watchdog", False)
     return b.log("watchdog")
@@ -216,7 +224,7 @@ def test_watchdog(b):
 
 def test_limits(b):
     print("limits")
-    start = b.ax.encoder.pos_estimate
+    start = b.get("axis0.encoder.pos_estimate")
     lo, hi = start - 2.0, start + 2.0
     b.set("axis0.controller.config.pos_min", lo)
     b.set("axis0.controller.config.pos_max", hi)
@@ -226,57 +234,57 @@ def test_limits(b):
     b.set("axis0.trap_traj.config.decel_limit", 10.0)
 
     b.closed_loop(POS, TRAP)
-    b.ax.controller.input_pos = start + 5.0
+    b.set("axis0.controller.input_pos", start + 5.0)
     b.event = "trap_to_+5"
     b.run(3.0)
-    p = b.ax.encoder.pos_estimate
-    b.check("trap move to +5 stops at pos_max", abs(p - hi) < 0.02 and b.ax.current_state == CLOSED_LOOP,
+    p = b.get("axis0.encoder.pos_estimate")
+    b.check("trap move to +5 stops at pos_max", abs(p - hi) < 0.02 and b.get("axis0.current_state") == CLOSED_LOOP,
             f"pos - pos_max {p - hi:+.4f} turn, errors {b.errors()}")
-    b.ax.requested_state = IDLE
+    b.set("axis0.requested_state", IDLE)
     b.idle_and_settle()
 
     b.set("axis0.controller.config.vel_ramp_rate", 20.0)
     b.closed_loop(VEL, VEL_RAMP)
-    b.ax.controller.input_vel = -2.0
+    b.set("axis0.controller.input_vel", -2.0)
     b.event = "vel_-2"
     b.run(3.0)
-    p = b.ax.encoder.pos_estimate
-    b.check("velocity control stops at pos_min", lo - 0.1 < p <= lo + 0.01 and b.ax.current_state == CLOSED_LOOP,
+    p = b.get("axis0.encoder.pos_estimate")
+    b.check("velocity control stops at pos_min", lo - 0.1 < p <= lo + 0.01 and b.get("axis0.current_state") == CLOSED_LOOP,
             f"pos - pos_min {p - lo:+.4f} turn, errors {b.errors()}")
-    b.ax.controller.input_vel = 2.0
+    b.set("axis0.controller.input_vel", 2.0)
     b.event = "vel_+2"
     b.run(0.5)
-    b.check("velocity control may move back inside", b.ax.encoder.pos_estimate > p + 0.3,
-            f"moved {b.ax.encoder.pos_estimate - p:+.3f} turn in 0.5 s")
-    b.ax.controller.input_vel = 0.0
-    b.ax.requested_state = IDLE
+    b.check("velocity control may move back inside", b.get("axis0.encoder.pos_estimate") > p + 0.3,
+            f"moved {b.get('axis0.encoder.pos_estimate') - p:+.3f} turn in 0.5 s")
+    b.set("axis0.controller.input_vel", 0.0)
+    b.set("axis0.requested_state", IDLE)
     b.idle_and_settle()
 
     b.closed_loop(TORQUE, PASSTHROUGH)
-    b.ax.controller.input_torque = 0.15
+    b.set("axis0.controller.input_torque", 0.15)
     b.event = "torque_+0.15"
     row = b.run(6.0, until=lambda r: b.v(r, "axis0.current_state") != CLOSED_LOOP)
-    b.ax.controller.input_torque = 0.0
+    b.set("axis0.controller.input_torque", 0.0)
     flags = b.controller_flags()
     b.check("torque control past pos_max faults POS_LIMIT_VIOLATION",
-            row is not None and "CONTROLLER_ERROR_POS_LIMIT_VIOLATION" in flags,
+            row is not None and "POS_LIMIT_VIOLATION" in flags,
             f"flags {flags}, fault at pos - pos_max {b.v(row, 'axis0.encoder.pos_estimate') - hi:+.3f} turn"
             if row else "no fault within 6 s")
     b.idle_and_settle()
 
-    outside = b.ax.encoder.pos_estimate
+    outside = b.get("axis0.encoder.pos_estimate")
     b.event = "closed_loop_outside"
     b.set("axis0.controller.config.control_mode", POS)
     b.set("axis0.controller.config.input_mode", PASSTHROUGH)
-    b.ax.requested_state = CLOSED_LOOP
+    b.set("axis0.requested_state", CLOSED_LOOP)
     b.run(0.5)
     flags = b.controller_flags()
     # A one-period torque kick on entry (125 us) is too short for this ~150 Hz sampler, and
     # Iq_setpoint is computed while disarmed too, so neither can show one.
     b.check("closed loop outside the limits faults at once",
-            b.ax.current_state != CLOSED_LOOP and "CONTROLLER_ERROR_POS_LIMIT_VIOLATION" in flags,
-            f"start {outside - hi:+.3f} turn past pos_max, state {b.ax.current_state}, flags {flags}, "
-            f"moved {b.ax.encoder.pos_estimate - outside:+.4f} turn")
+            b.get("axis0.current_state") != CLOSED_LOOP and "POS_LIMIT_VIOLATION" in flags,
+            f"start {outside - hi:+.3f} turn past pos_max, state {b.get('axis0.current_state')}, flags {flags}, "
+            f"moved {b.get('axis0.encoder.pos_estimate') - outside:+.4f} turn")
     b.idle_and_settle()
     b.set("axis0.controller.config.pos_min", -math.inf)
     b.set("axis0.controller.config.pos_max", math.inf)
@@ -291,16 +299,16 @@ def test_following(b):
     b.set("axis0.trap_traj.config.accel_limit", 5.0)
     b.set("axis0.trap_traj.config.decel_limit", 5.0)
     b.closed_loop(POS, TRAP)
-    b.ax.controller.input_pos = b.ax.encoder.pos_estimate + 10.0
+    b.set("axis0.controller.input_pos", b.get("axis0.encoder.pos_estimate") + 10.0)
     b.event = "normal_move"
     b.run(3.5)
-    b.check("normal 6 turn/s move does not trip", b.ax.current_state == CLOSED_LOOP and not b.ax.controller.error,
+    b.check("normal 6 turn/s move does not trip", b.get("axis0.current_state") == CLOSED_LOOP and not b.get("axis0.controller.error"),
             f"errors {b.errors()}")
-    b.ax.requested_state = IDLE
+    b.set("axis0.requested_state", IDLE)
     b.idle_and_settle()
 
-    for name, pos_lim, vel_lim, flag in (("position", 0.05, math.inf, "CONTROLLER_ERROR_POS_FOLLOWING_ERROR"),
-                                         ("velocity", math.inf, 2.0, "CONTROLLER_ERROR_VEL_FOLLOWING_ERROR")):
+    for name, pos_lim, vel_lim, flag in (("position", 0.05, math.inf, "POS_FOLLOWING_ERROR"),
+                                         ("velocity", math.inf, 2.0, "VEL_FOLLOWING_ERROR")):
         b.set("axis0.controller.config.max_pos_error", pos_lim)
         b.set("axis0.controller.config.max_vel_error", vel_lim)
         b.set("axis0.motor.config.current_lim", 1.0)
@@ -308,7 +316,7 @@ def test_following(b):
         b.set("axis0.trap_traj.config.accel_limit", 60.0)
         b.set("axis0.trap_traj.config.decel_limit", 60.0)
         b.closed_loop(POS, TRAP)
-        b.ax.controller.input_pos = b.ax.encoder.pos_estimate + 10.0
+        b.set("axis0.controller.input_pos", b.get("axis0.encoder.pos_estimate") + 10.0)
         b.event = f"fast_move_{name}"
         row = b.run(3.0, until=lambda r: b.v(r, "axis0.current_state") != CLOSED_LOOP)
         flags = b.controller_flags()
@@ -324,15 +332,15 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tests", default="watchdog,limits,following")
     args = ap.parse_args()
-    dev = connect(timeout=10)
-    serial = format(dev.serial_number, "X")
+    board = usb.connect()
+    serial = format(board.get(odrv.serial_number), "X")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    b = Bench(dev, stamp, serial)
+    b = Bench(board, stamp, serial)
     saved = {p: b.get(p) for p in SETTINGS}
     tests = {"watchdog": test_watchdog, "limits": test_limits, "following": test_following}
     logs, abort = [], None
     try:
-        b.ax.requested_state = IDLE
+        b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
         for name in args.tests.split(","):
             logs.append(str(tests[name](b).relative_to(WORKDIR)))
@@ -341,9 +349,9 @@ def main():
         print(f"ABORT: {abort}")
     finally:
         try:
-            b.ax.requested_state = IDLE
+            b.set("axis0.requested_state", IDLE)
             t = time.monotonic()
-            while abs(b.ax.encoder.vel_estimate) > 0.5 and time.monotonic() - t < 20:
+            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
                 time.sleep(0.05)
             for p, val in saved.items():
                 b.set(p, val)

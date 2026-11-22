@@ -36,11 +36,12 @@ import math
 import sys
 import time
 
-from dump_board import connect, decode_bitmask
 from impedance_test import IMPEDANCE, gains
-from move_test import ERROR_FIELDS, trap_time
+from move_test import ERROR_FIELDS, error_problems, trap_time
 from safety_test import CLOSED_LOOP, IDLE, IX, LOGS, PASSTHROUGH, POS, SETTINGS, TRAP, WORKDIR, Bench, Unexpected
-from sample import resolve
+from xdrive import usb
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 MOVES = [  # (turns out and back, trap vel turn/s, accel turn/s^2)
     (0.5, 2.0, 10.0),
@@ -77,7 +78,7 @@ def start(b, control_mode, input_mode, current_lim):
     b.set("axis0.motor.config.current_lim", current_lim)
     b.closed_loop(control_mode, input_mode)
     b.armed = True
-    return b.ax.controller.input_pos
+    return b.get("axis0.controller.input_pos")
 
 
 def moves(b):
@@ -89,7 +90,7 @@ def moves(b):
         b.set("axis0.trap_traj.config.decel_limit", accel)
         for target in (home + size, home):
             b.event = f"move {target - home:+g}"
-            b.ax.controller.input_pos = target
+            b.set("axis0.controller.input_pos", target)
             limit = trap_time(size, vel, accel, accel) + 2.0
             b.run(0.05)
             if b.run(limit, until=lambda r: b.v(r, "axis0.controller.trajectory_done")) is None:
@@ -106,11 +107,11 @@ def sine(b):
         w = 2 * math.pi * freq
         t0 = time.monotonic()
         while (t := time.monotonic() - t0) < seconds:
-            b.ax.controller.input_vel = amp * w * math.sin(w * t)
-            b.ax.controller.input_pos = home + amp * (1.0 - math.cos(w * t))
+            b.set("axis0.controller.input_vel", amp * w * math.sin(w * t))
+            b.set("axis0.controller.input_pos", home + amp * (1.0 - math.cos(w * t)))
             b.sample()
-        b.ax.controller.input_vel = 0.0
-        b.ax.controller.input_pos = home
+        b.set("axis0.controller.input_vel", 0.0)
+        b.set("axis0.controller.input_pos", home)
         b.run(PAUSE)
 
 
@@ -127,12 +128,12 @@ def spring(b, seconds):
             del b.rows[:-KEEP_ROWS]
         if abs(pos - anchor) > SPRING_REACH:
             anchor = pos - math.copysign(SPRING_REACH, pos - anchor)
-            b.ax.controller.input_pos = anchor
+            b.set("axis0.controller.input_pos", anchor)
     # Ease back to the start angle without a snap: move the anchor at about 1 turn/s.
     b.event = "spring return"
     while abs(anchor - home) > 1e-3:
         anchor += max(-0.01, min(0.01, home - anchor))
-        b.ax.controller.input_pos = anchor
+        b.set("axis0.controller.input_pos", anchor)
         b.run(0.01)
     b.run(1.0)  # the rotor lags the anchor by about 0.1 turn at 1 turn/s: let the spring pull it in
     gains(b, 0.0, 0.0)
@@ -146,25 +147,22 @@ def main():
                       help="run only the spring, for S seconds (without S: until Ctrl-C)")
     args = ap.parse_args()
 
-    dev = connect(timeout=10)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        board = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    serial = format(dev.serial_number, "X")
-    ax = dev.axis0
-    problems = [p for p, bad in (("motor not calibrated", not ax.motor.is_calibrated),
-                                 ("encoder not ready", not ax.encoder.is_ready)) if bad]
-    for name, prefix in (("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                         ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")):
-        flags = decode_bitmask(resolve(dev, name).get_value(), prefix)["flags"]
-        if flags:
-            problems.append(f"{name}: {' | '.join(flags)}")
+    serial = format(board.get(odrv.serial_number), "X")
+    ax = odrv.axis0
+    problems = [p for p, bad in (("motor not calibrated", not board.get(ax.motor.is_calibrated)),
+                                 ("encoder not ready", not board.get(ax.encoder.is_ready))) if bad]
+    problems += error_problems(board)
     if problems:
         print("Not starting:\n  " + "\n  ".join(problems))
         return 2
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    b = DemoBench(dev, stamp, serial, prefix="demo")
+    b = DemoBench(board, stamp, serial, prefix="demo")
     saved = {p: b.get(p) for p in SETTINGS + [FILTER_BW_PATH]}
     b.set("axis0.config.enable_watchdog", False)  # nothing feeds it here; restored with the rest
     LOGS.mkdir(exist_ok=True)
@@ -186,9 +184,9 @@ def main():
     finally:
         try:
             b.armed = False
-            ax.requested_state = IDLE
+            b.set("axis0.requested_state", IDLE)
             t = time.monotonic()
-            while abs(ax.encoder.vel_estimate) > 0.5 and time.monotonic() - t < 20:
+            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
                 time.sleep(0.05)
             gains(b, 0.0, 0.0)
             for p, val in saved.items():

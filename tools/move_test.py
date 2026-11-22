@@ -27,17 +27,16 @@ import pathlib
 import sys
 import time
 
-import odrive
-from odrive.enums import (AXIS_STATE_CLOSED_LOOP_CONTROL, AXIS_STATE_IDLE,
-                          CONTROL_MODE_POSITION_CONTROL, INPUT_MODE_TRAP_TRAJ)
-
-from dump_board import decode_bitmask, decode_enum, connect
-from sample import FIELDS as BASE_FIELDS, resolve
+from sample import FIELDS as BASE_FIELDS
+from xdrive import paths, report, usb
+from xdrive.enums import AxisState, ControlMode, InputMode
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
 
-FIELDS = BASE_FIELDS + ["axis0.controller.trajectory_done", "axis0.motor.current_control.Ibus"]
+FIELDS = BASE_FIELDS + ["axis0.controller.trajectory_done", "axis0.motor.I_bus"]
 IX = {f: i for i, f in enumerate(FIELDS)}
 ERROR_FIELDS = [f for f in FIELDS if f.endswith("error")]
 
@@ -71,9 +70,18 @@ def trap_time(dist, v, a, d):
     return vp / a + vp / d
 
 
+CLOSED_LOOP = AxisState.CLOSED_LOOP_CONTROL.value
+
+
+def error_problems(b):
+    """One line per non-zero axis0 error flag set, for a precondition check."""
+    return [f"{name} error {report.line(err)}" for name, err in report.errors(b).items() if err]
+
+
 class Recorder:
-    def __init__(self, dev):
-        self.props = [resolve(dev, f) for f in FIELDS]
+    def __init__(self, b):
+        self.b = b
+        self.props = [paths.prop(f) for f in FIELDS]
         self.t0 = time.monotonic()
         self.rows = []
         self.event = ""
@@ -83,7 +91,7 @@ class Recorder:
         self.no_current_n = 0     # consecutive samples with big Iq command but ~no measured current
 
     def sample(self):
-        row = [time.monotonic() - self.t0] + [p.get_value() for p in self.props] + [self.event]
+        row = [time.monotonic() - self.t0] + paths.read(self.b, self.props) + [self.event]
         self.event = ""
         self.rows.append(row)
         errs = {f: row[1 + IX[f]] for f in ERROR_FIELDS if row[1 + IX[f]]}
@@ -102,7 +110,7 @@ class Recorder:
             if self.no_current_n >= 20:
                 raise Abort(f"current not following command (Iq_sp {iq_sp:.1f} A, Iq_meas {iq_m:.2f} A for 20 samples)"
                             " - power stage not driving the motor; reboot after save_configuration?")
-        if self.expect_closed_loop and row[1 + IX["axis0.current_state"]] != AXIS_STATE_CLOSED_LOOP_CONTROL:
+        if self.expect_closed_loop and row[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
             raise Abort(f"left closed loop: state={row[1 + IX['axis0.current_state']]}")
         return row
 
@@ -145,32 +153,26 @@ def main():
     args = ap.parse_args()
     moves = [float(m) for m in args.moves.split(",")]
 
-    dev = connect(timeout=10)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        b = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    ax = dev.axis0
-    serial = format(dev.serial_number, "X")
+    ax = odrv.axis0
+    serial = format(b.get(odrv.serial_number), "X")
 
     # --- Preconditions (read-only) ---
     problems = []
-    if not ax.motor.is_calibrated:
+    if not b.get(ax.motor.is_calibrated):
         problems.append("motor not calibrated")
-    if not ax.encoder.is_ready:
+    if not b.get(ax.encoder.is_ready):
         problems.append("encoder not ready")
-    if ax.controller.config.control_mode != CONTROL_MODE_POSITION_CONTROL:
-        problems.append(f"control_mode is {ax.controller.config.control_mode}, not POSITION")
-    if ax.controller.config.input_mode != INPUT_MODE_TRAP_TRAJ:
-        problems.append(f"input_mode is {ax.controller.config.input_mode}, not TRAP_TRAJ")
-    for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                         ("axis0.encoder.error", "ENCODER_ERROR_"), ("axis0.controller.error", "CONTROLLER_ERROR_")]:
-        v = resolve(dev, name).get_value()
-        if v:
-            problems.append(f"{name} = {decode_bitmask(v, prefix)}")
-    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) < (0, 5, 2) and dev.axis1.error & 0x8:
-        problems.append("axis1 has CURRENT_MEASUREMENT_TIMEOUT: PWM/ADC timing disrupted "
-                        "(fw 0.5.1 after save_configuration()); reboot first (reboot_watch.py)")
-    vbus = dev.vbus_voltage
+    if (mode := b.get(ax.controller.config.control_mode)) is not ControlMode.POSITION_CONTROL:
+        problems.append(f"control_mode is {mode.name}, not POSITION_CONTROL")
+    if (imode := b.get(ax.controller.config.input_mode)) is not InputMode.TRAP_TRAJ:
+        problems.append(f"input_mode is {imode.name}, not TRAP_TRAJ")
+    problems += error_problems(b)
+    vbus = b.get(odrv.vbus_voltage)
     if not 20.0 <= vbus <= 28.0:
         problems.append(f"vbus {vbus:.2f} V outside 20–28 V")
     if problems:
@@ -182,32 +184,31 @@ def main():
     for opt, path in SETTINGS.items():
         val = getattr(args, opt)
         if val is not None:
-            prop = resolve(dev, path)
-            changed[path] = prop.get_value()
-            prop.set_value(val)
-    trap = {k: resolve(dev, f"axis0.trap_traj.config.{k}").get_value() for k in ("vel_limit", "accel_limit", "decel_limit")}
-    applied = {path: resolve(dev, path).get_value() for path in changed}
+            changed[path] = paths.get(b, path)
+            paths.set(b, path, val)
+    trap = {k: paths.get(b, f"axis0.trap_traj.config.{k}") for k in ("vel_limit", "accel_limit", "decel_limit")}
+    applied = {path: paths.get(b, path) for path in changed}
     if "axis0.motor.config.current_control_bandwidth" in changed:
-        print(f"current loop: bandwidth {ax.motor.config.current_control_bandwidth:g} rad/s -> "
-              f"p_gain {ax.motor.current_control.p_gain:.4f}, i_gain {ax.motor.current_control.i_gain:.1f}")
+        print(f"current loop: bandwidth {b.get(ax.motor.config.current_control_bandwidth):g} rad/s -> "
+              f"p_gain {b.get(ax.motor.current_control.p_gain):.4f}, i_gain {b.get(ax.motor.current_control.i_gain):.1f}")
     start_stamp = datetime.datetime.now().astimezone()
 
     peak = max(min(trap["vel_limit"], math.sqrt(2 * abs(m) * trap["accel_limit"] * trap["decel_limit"]
                                                 / (trap["accel_limit"] + trap["decel_limit"]))) for m in moves)
-    rec = Recorder(dev)
+    rec = Recorder(b)
     rec.max_vel = args.max_vel if args.max_vel is not None else 1.5 * peak + 2.0
     print(f"expected peak speed {peak:.2f} turn/s; runaway guard at {rec.max_vel:.1f} turn/s")
     segments, abort_reason, final_errors = [], None, {}
     current = ("closed_loop_entry", 0)  # (segment name, first row) of the segment in progress
     try:
         rec.event = "closed_loop_request"
-        ax.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
         deadline = time.monotonic() + 1.0
-        while rec.sample()[1 + IX["axis0.current_state"]] != AXIS_STATE_CLOSED_LOOP_CONTROL:
+        while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
             if time.monotonic() > deadline:
                 raise Abort("did not enter closed loop within 1 s")
         rec.expect_closed_loop = True
-        home = ax.controller.input_pos
+        home = b.get(ax.controller.input_pos)
         rec.event = "hold"
         i0 = len(rec.rows)
         rec.run_for(1.0)
@@ -219,7 +220,7 @@ def main():
                 i0 = len(rec.rows)
                 current = (name, i0)
                 t_cmd = time.monotonic()
-                ax.controller.input_pos = target
+                b.set(ax.controller.input_pos, target)
                 limit = trap_time(abs(size), trap["vel_limit"], trap["accel_limit"], trap["decel_limit"]) + 3.0
                 done_at = None
                 while True:
@@ -243,7 +244,7 @@ def main():
         abort_reason = "Ctrl-C"
     finally:
         try:
-            ax.requested_state = AXIS_STATE_IDLE
+            b.set(ax.requested_state, AxisState.IDLE)
         except Exception as ex:  # USB gone: the only stop left is the PSU
             print(f"!!! Could not command IDLE ({ex!r}). Press OUT on the PSU.")
         try:
@@ -254,18 +255,15 @@ def main():
                 rec.sample()
             except Abort:
                 pass
-            for name, prefix in [("axis0.error", "AXIS_ERROR_"), ("axis0.motor.error", "MOTOR_ERROR_"),
-                                 ("axis0.encoder.error", "ENCODER_ERROR_"),
-                                 ("axis0.controller.error", "CONTROLLER_ERROR_"),
-                                 ("axis0.motor.gate_driver.drv_fault", "DRV_FAULT_")]:
-                final_errors[name] = decode_bitmask(resolve(dev, name).get_value(), prefix)
+            final_errors = {name: report.jsonable(err) for name, err in report.errors(b).items()}
+            final_errors["last_drv_fault"] = {"hex": f"0x{b.get(ax.last_drv_fault):08X}", "flags": []}
             # The overspeed check runs in IDLE too: restoring a lower vel_limit while the rotor still
             # coasts (after an abort at speed) latches CONTROLLER_ERROR_OVERSPEED. Wait for it to slow.
             t_coast = time.monotonic()
-            while abs(ax.encoder.vel_estimate) > 1.0 and time.monotonic() - t_coast < 30.0:
+            while abs(paths.get(b, "axis0.encoder.vel_estimate")) > 1.0 and time.monotonic() - t_coast < 30.0:
                 time.sleep(0.1)
             for path, old in changed.items():
-                resolve(dev, path).set_value(old)
+                paths.set(b, path, old)
         except Exception as ex:
             print(f"Post-run read/restore failed: {ex!r}")
 

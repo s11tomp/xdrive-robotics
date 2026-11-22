@@ -1,6 +1,6 @@
 # Python library (`xdrive`)
 
-`tools/xdrive` is the host library for this firmware: typed reads, writes and function calls on a board, by names generated from the firmware's interface file. It talks to the board over USB with its own client for the firmware's packet protocol, so it needs neither the `odrive` Python package nor `odrivetool`. CAN support (the same `Board` over [endpoint access](can.md#endpoint-access-0x1f), plus a bus object for commanding several joints) is planned. The tools in `tools/` still use the `odrive` package and move to `xdrive` one at a time.
+`tools/xdrive` is the host library for this firmware: typed reads, writes and function calls on a board, by names generated from the firmware's interface file. It talks to the board over USB with its own client for the firmware's packet protocol, so it needs neither the `odrive` Python package nor `odrivetool`, and over [CAN](#can) with python-can: the same `Board` through [endpoint access](can.md#endpoint-access-0x1f), plus a `Bus` that commands several joints per control cycle. The CAN part is tested against fake boards on python-can's virtual bus, not yet on a real bus. The tools in `tools/` still use the `odrive` package and move to `xdrive` one at a time.
 
 ```python
 from xdrive import usb
@@ -67,7 +67,7 @@ All of them are methods of `xdrive.board.Board`. Each `get` and `set` is a trans
 | `call(func(args))` | Writes the function's inputs, runs it, reads its outputs: returns `None`, one value, or a tuple |
 | `save()` | `save_configuration()`: the board stores its config and reboots. Returns once it answers again |
 | `reboot()` | Reboots the board; returns once it answers again |
-| `close()` | Releases the USB interface (also on leaving a `with` block) |
+| `close()` | Releases the USB interface, or ends the CAN link (the bus stays open); also on leaving a `with` block |
 
 **`set` returns what the board stored,** which can differ from what was written. A setter can clamp a value, and some properties are consumed at once: after `set(odrv.axis0.requested_state, AxisState.CLOSED_LOOP_CONTROL)` the board has acted on the request and cleared it, so the call returns `AxisState.UNDEFINED`. Read `current_state` for the result.
 
@@ -96,8 +96,8 @@ Every exception derives from `xdrive.errors.XdriveError`:
 |---|---|
 | `LinkError` | No board on USB, several boards and no serial given, the interface already claimed, or a transfer failed |
 | `LinkTimeout` (a `LinkError`) | The board didn't reply within the timeout (default 1 s) |
-| `LinkLost` (a `LinkError`) | The board went away (rebooted or unplugged), the link is closed, or the interface JSON read back doesn't match its version ID |
-| `Refused` | The board answered but refused: no such endpoint, a failed write, `save()` while armed |
+| `LinkLost` (a `LinkError`) | The board went away (rebooted or unplugged), the link or the CAN bus is closed, the CAN adapter failed, or the interface JSON read back doesn't match its version ID |
+| `Refused` | The board answered but refused: no such endpoint, a failed write, `save()` while armed; over CAN also a property wider than 4 bytes, without a request |
 | `InterfaceMismatch` | The board's firmware build lacks a name from `xdrive.props`, types it differently, or returns an enum value the class doesn't have |
 | `TypeError`, `ValueError` | A value of the wrong Python type (`1` for an `AxisState`), or one that doesn't fit the property (`-1` for a `uint8`) |
 
@@ -106,6 +106,33 @@ A name that the board's build lacks fails only when it is used, so a script writ
 ## Several boards
 
 `usb.connect()` opens the only board on USB and fails if there are several. `usb.serials()` lists them; `usb.connect(serial="0123456789AB")` opens one. Each `Board` is independent, so a script can hold several.
+
+## CAN
+
+`xdrive.can.open()` passes its arguments to python-can's `can.Bus` and returns an `xdrive.can.Bus`, which owns it. Any python-can interface works; on macOS a candleLight (gs_usb) adapter such as a CANable is `interface="gs_usb"`, with pyusb and libusb as for USB.
+
+```python
+from xdrive import can
+from xdrive.enums import AxisState, ControlMode, InputMode
+from xdrive.props import odrv
+
+with can.open(interface="gs_usb", channel=0, bitrate=1_000_000) as bus:
+    print(bus.scan())                     # [1, 2]: node IDs heard in heartbeats within 0.3 s
+    j1 = bus.connect(1)                   # a Board, as over USB; reads the node's impedance ranges too
+    j1.set(odrv.axis0.controller.config.control_mode, ControlMode.IMPEDANCE_CONTROL)
+    j1.set(odrv.axis0.controller.config.input_mode, InputMode.PASSTHROUGH)
+    j1.set(odrv.axis0.requested_state, AxisState.CLOSED_LOOP_CONTROL)   # motor moves
+    replies = bus.cycle({1: can.Impedance(pos=0.25, kp=20.0, kd=0.3)}, timeout=0.002)
+    if (r := replies[1]) is not None:
+        print(r.pos, r.vel, r.torque, r.armed, r.error, r.timeout)
+```
+
+- **`bus.connect(node)`** returns a `Board` with every operation above. Each request is one 8-byte frame pair, 4 bytes of value, so properties wider than 4 bytes (`serial_number`, `motor.error`, `axis0.steps`) raise `Refused` without a request; read `motor.error` with the Get Motor Error message. The first connect to a firmware build reads the 37 KB interface JSON 4 bytes at a time (about 9,300 frame pairs), then the cache serves it. A node has one request in flight at a time, and a request that timed out can leave a late reply that the next request with the same opcode and endpoint takes. Several threads can use one `Bus`.
+- **`save()` and `reboot()`** wait for the request's timeout (default 1 s, `can.open(timeout=...)`), since the board resets before it replies, then poll the node until it answers; they don't need its heartbeat. A board whose `node_id` was changed and saved answers on the new ID, so `save()` raises `LinkTimeout` after its 15 s although the save worked: `bus.connect(new_id)`.
+- **`bus.cycle(commands, timeout)`** sends one [impedance command](can.md#the-impedance-command-0x1e) per node and returns each node's reply, decoded with that node's ranges, or `None` for a node that didn't answer within `timeout`. It returns as soon as every node has answered. A reply that arrives after its cycle's timeout but during the next cycle can be taken as that cycle's reply, one cycle old; outside a cycle, replies are dropped. The command only sets the inputs: set the control mode and closed loop first, as above.
+- **`bus.ranges`** holds each connected node's `axis0.config.can.impedance_*` ranges, read by `connect()`. After changing them on a board, connect to it again.
+- **`bus.heartbeat(node)`** returns the latest heartbeat (`state`, `axis_error`, the motor, encoder and controller error flags, `trajectory_done`, and the host's `time.monotonic()` at receipt `t`), or `None`. `bus.scan(timeout)` lists the nodes heard during `timeout`.
+- **One reader thread** takes every frame off the bus. Frames this host sent are never taken as replies (gs_usb adapters hand them back). If the adapter fails, every later request raises `LinkLost` with the failure.
 
 ## The interface JSON and its cache
 

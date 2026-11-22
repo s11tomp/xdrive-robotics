@@ -1,4 +1,4 @@
-"""The host codec (endpoint_frame.py) against the firmware's endpoint_frame.hpp, compiled with clang++
+"""The host codec (xdrive/endpoint_frame.py) against the firmware's endpoint_frame.hpp, compiled with clang++
 and run against the fake endpoint table in endpoint_frame_cli.cpp.
 
 Run from the repo root: python -m pytest -q tools/tests
@@ -14,7 +14,7 @@ import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-import endpoint_frame as f  # noqa: E402
+from xdrive import endpoint_frame as f  # noqa: E402
 
 FIRMWARE = HERE.parents[1] / "src"
 S = f.Status
@@ -138,21 +138,3 @@ def test_decode_reply_rejects_requests():
         f.decode_reply(f.read_request(10))
     with pytest.raises(ValueError):
         f.decode_reply(bytes(7))
-
-
-def test_endpoints_names_from_interface_json():
-    interface = [
-        {"name": "", "id": 0, "type": "json", "access": "r"},
-        {"name": "axis0", "type": "object", "members": [
-            {"name": "controller", "type": "object", "members": [
-                {"name": "config", "type": "object", "members": [
-                    {"name": "pos_gain", "id": 300, "type": "float", "access": "rw"}]}]}]},
-        {"name": "save_configuration", "id": 524, "type": "function", "inputs": [],
-         "outputs": [{"name": "success", "id": 525, "type": "bool", "access": "r"}]},
-    ]
-    e = f.endpoints(interface)
-    assert e == {
-        "axis0.controller.config.pos_gain": f.Endpoint(300, "float", "rw"),
-        "save_configuration": f.Endpoint(524, "function", ""),
-        "save_configuration.success": f.Endpoint(525, "bool", "r"),
-    }

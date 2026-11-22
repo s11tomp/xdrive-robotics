@@ -14,11 +14,11 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - Soft position limits (`controller.config.pos_min`, `pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). Safety faults zero the torque.
 - Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4; `controller.input_kp`, `input_kd`).
 - CAN impedance command and reply (CANSimple ID 0x1E; full scales in `axis.config.can.impedance_*`).
-- CAN endpoint access (CANSimple ID 0x1F): read or write any property up to 4 bytes wide, call any function, and read the interface JSON and the capture buffer, by endpoint ID (`tools/endpoint_frame.py`).
+- CAN endpoint access (CANSimple ID 0x1F): read or write any property up to 4 bytes wide, call any function, and read the interface JSON and the capture buffer, by endpoint ID (host codec `tools/xdrive/endpoint_frame.py`).
 - Flux braking (`motor.config.flux_brake_start_voltage`, `flux_brake_gain`) and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`).
 - High-rate capture (`odrv.capture`), replacing the hard-wired oscilloscope buffer.
 - Build with plain make (`make`), and host tools for flashing over USB DFU or SWD, configuration and bench tests (`tools/`).
-- Host library `xdrive` (`tools/xdrive/`): typed reads, writes and function calls on a board over USB, with every property and function named in the generated `xdrive.props` (`board.get(odrv.axis0.encoder.pos_estimate)`), checked by mypy. It speaks the firmware's USB protocol itself, without the `odrive` Python package.
+- Host library `xdrive` (`tools/xdrive/`): typed reads, writes and function calls on a board over USB, with every property and function named in the generated `xdrive.props` (`board.get(odrv.axis0.encoder.pos_estimate)`), checked by mypy. It speaks the firmware's USB protocol itself, without the `odrive` Python package. Over CAN (`xdrive.can`, with python-can), the same board API runs through endpoint access, and a `Bus` lists nodes by heartbeat and sends one impedance command per joint per control cycle.
 - A CAN database for this firmware's CANSimple messages, the impedance command included (`docs/cansimple.dbc`), and `make test`, which runs ODrive's unit tests and the host tools' tests without a board.
 
 ### Changed

@@ -11,7 +11,8 @@ The firmware is tested on a bench stand, a DJI 10018 with an unloaded rotor on a
 
 The host tools' tests check:
 
-- the CAN impedance frame: the host codec (`impedance_frame.py`) against the firmware's header (`impedance_frame.hpp`), compiled on the host;
+- the CAN impedance and endpoint-access frames: the host codecs (`xdrive/impedance_frame.py`, `xdrive/endpoint_frame.py`) against the firmware's headers (`impedance_frame.hpp`, `endpoint_frame.hpp`), compiled on the host;
+- the host library (`xdrive`): its generated names against the interface JSON, `Board` against a fake endpoint table, the USB link against a fake device, and the CAN bus against fake boards on python-can's virtual bus;
 - the CAN database (`docs/cansimple.dbc`): the impedance command and a float message encode and decode as the host codec does;
 - the bus current soft limits (`bus_limit.hpp`) against their contract, on 3,000 random operating points plus a grid;
 - the release notes extraction from `CHANGELOG.md`.

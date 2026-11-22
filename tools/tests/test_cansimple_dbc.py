@@ -10,7 +10,7 @@ import pytest
 
 TOOLS = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(TOOLS))
-import impedance_frame as f  # noqa: E402
+from xdrive import impedance_frame as f  # noqa: E402
 
 DB = cantools.database.load_file(TOOLS.parent / "docs" / "cansimple.dbc")
 R = f.Ranges()
@@ -43,7 +43,7 @@ def test_set_input_pos_layout():
 
 
 def test_endpoint_request_matches_codec():
-    import endpoint_frame as ep
+    from xdrive import endpoint_frame as ep
     msg = DB.get_message_by_name(f"Node{NODE}_Endpoint")
     assert msg.frame_id == NODE << 5 | ep.MSG_ENDPOINT
     raw = ep.write_request(0x1234, "uint32", 0xDEADBEEF)

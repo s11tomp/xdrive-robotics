@@ -1,4 +1,4 @@
-"""The host codec (impedance_frame.py) against the firmware's impedance_frame.hpp, compiled with clang++.
+"""The host codec (xdrive/impedance_frame.py) against the firmware's impedance_frame.hpp, compiled with clang++.
 
 Run from the repo root: python -m pytest -q tools/tests
 """
@@ -12,7 +12,7 @@ import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-import impedance_frame as f  # noqa: E402
+from xdrive import impedance_frame as f  # noqa: E402
 
 FIRMWARE = HERE.parents[1] / "src"
 R = f.Ranges()

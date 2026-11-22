@@ -5,7 +5,7 @@ SavvyCAN and other DBC readers.
 Each message is defined once per node ID 0 to 7 (Node<n>_<message>, arbitration ID n << 5 | command),
 with the layouts of src/communication/can/can_simple.cpp. Error and state values come from
 tools/enums_v056.py. The impedance command's scales assume the default axis.config.can.impedance_*
-ranges (tools/impedance_frame.py Ranges); the node answers it, and endpoint access, on the same ID
+ranges (tools/xdrive/impedance_frame.py Ranges); the node answers it, and endpoint access, on the same ID
 with a reply a DBC can't also describe (see the messages' comments).
 
 Usage: `make generate` (runs this with the repo's .venv).
@@ -16,9 +16,8 @@ from cantools.database import dump_file
 from cantools.database.can import Bus, Database, Message, Node, Signal
 from cantools.database.conversion import BaseConversion
 
-import endpoint_frame
 import enums_v056 as e
-import impedance_frame
+from xdrive import endpoint_frame, impedance_frame
 
 OUTPUT = pathlib.Path(__file__).resolve().parents[1] / "docs" / "cansimple.dbc"
 NODES = range(8)
@@ -105,7 +104,7 @@ def node_messages(node):
          HOST,
          "Impedance command, with scales for the default axis.config.can.impedance_* ranges. The node answers "
          "on the same ID: pos 16 | vel 12 | torque 12 | flags 8 | FET temperature 8 (degC) | bus voltage 8 "
-         "(0.25 V), big-endian; tools/impedance_frame.py decodes it."),
+         "(0.25 V), big-endian; tools/xdrive/impedance_frame.py decodes it."),
         (endpoint_frame.MSG_ENDPOINT, "Endpoint", 8, [
             sig("Ep_Opcode", 0, 8, receiver=n, choices={op.value: op.name for op in endpoint_frame.Op}),
             sig("Ep_Endpoint_ID", 8, 16, receiver=n),
@@ -113,7 +112,7 @@ def node_messages(node):
          HOST,
          "Endpoint access request: read, write or call a fibre endpoint by its ID in the interface JSON, or "
          "read a buffer at a byte offset (Ep_Value). The node answers on the same ID: opcode | 0x80, endpoint "
-         "ID, status (byte 3), value; tools/endpoint_frame.py encodes and decodes both."),
+         "ID, status (byte 3), value; tools/xdrive/endpoint_frame.py encodes and decodes both."),
     ]
 
 

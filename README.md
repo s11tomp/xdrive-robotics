@@ -27,8 +27,8 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
   - following-error faults (`max_pos_error`, `max_vel_error`), which zero the torque.
 - **Closed-loop entry starts from rest:** zero velocity and torque setpoints, no running trajectory.
 - **Impedance control** (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4): torque = `input_kp` x position error + `input_kd` x velocity error + `input_torque`, with no integrator.
-- **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `src/communication/can/impedance_frame.hpp`; host codec: `tools/impedance_frame.py`.
-- **Endpoint access over CAN** (CANSimple ID 0x1F): read or write any property, call any function, and read the interface JSON and the capture buffer, by the endpoint IDs USB uses. A board can be configured, tuned, saved and rebooted with no USB connection. Layout: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/endpoint_frame.py`.
+- **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `src/communication/can/impedance_frame.hpp`; host codec: `tools/xdrive/impedance_frame.py`.
+- **Endpoint access over CAN** (CANSimple ID 0x1F): read or write any property, call any function, and read the interface JSON and the capture buffer, by the endpoint IDs USB uses. A board can be configured, tuned, saved and rebooted with no USB connection. Layout: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/xdrive/endpoint_frame.py`.
 - **Regen limits**, off by default: flux braking above a bus voltage (`motor.config.flux_brake_start_voltage`), and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`) that burn regen in the windings before cutting braking torque.
 - **High-rate capture** (`odrv.capture`): up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer, with a level, manual or immediate trigger, read back in about 0.2 s.
 
@@ -121,8 +121,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `demo.py` | Motor moves. A demo for an audience: moves and a sine sweep in a loop (`--loop N`, or until Ctrl-C), or with `--spring [S]` only a spring to twist by hand |
 | `spike_hunt.py`, `brake_check.py`, `profile_loop.py` | Motor moves. Diagnostics: current-measurement glitches, hard braking, control-loop timing |
 | `analyze_*.py` | Offline analysis of the logs |
-| `impedance_frame.py` | Host codec for the CAN impedance command (no I/O) |
-| `xdrive/` | The host library: typed access to a board over USB ([Python library](docs/python-library.md)). The tools above still use the `odrive` package and move to it one at a time |
+| `xdrive/` | The host library: typed access to a board over USB or CAN, impedance commands to several joints over CAN, and the CAN frame codecs ([Python library](docs/python-library.md)). The tools above still use the `odrive` package and move to it one at a time |
 
 `make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers), mypy on the host library, and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
 

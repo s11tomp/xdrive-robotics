@@ -1,4 +1,4 @@
-"""Host side of the CANSimple impedance command (MSG_IMPEDANCE) and its reply.
+"""Codec for the CANSimple impedance command (MSG_IMPEDANCE) and its reply. No I/O.
 
 Mirror of the firmware's src/communication/can/impedance_frame.hpp; tests/test_impedance_frame.py
 compiles that header and checks both against each other.
@@ -11,6 +11,8 @@ axis.config.can.impedance_* settings; both ends must use the same ones.
 
 The frame uses arbitration ID node_id << 5 | MSG_IMPEDANCE in both directions.
 """
+from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 

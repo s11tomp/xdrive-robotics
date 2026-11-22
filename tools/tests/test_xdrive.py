@@ -1,5 +1,6 @@
 """The host library (tools/xdrive): the generated names against the interface JSON the firmware embeds,
-and Board against a fake link that behaves like the firmware's endpoint handlers.
+Board against a fake link that behaves like the firmware's endpoint handlers, the USB link against a
+fake device, and the CAN bus against fake boards on python-can's virtual bus.
 
 The JSON comes from the interface generator with the template the firmware build uses
 (`to_c_string` of the endpoint definitions), so no firmware build is needed.
@@ -13,9 +14,12 @@ import pathlib
 import struct
 import subprocess
 import sys
+import threading
 import time
+import uuid
 from typing import Any, Iterator
 
+import can as python_can
 import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -23,11 +27,14 @@ sys.path.insert(0, str(HERE.parent))
 from xdrive import interface  # noqa: E402
 from xdrive.board import Board, load_interface  # noqa: E402
 from xdrive.enums import AxisError, AxisState, ControlMode  # noqa: E402
-from xdrive.errors import InterfaceMismatch, LinkLost, Refused  # noqa: E402
+from xdrive.errors import InterfaceMismatch, LinkLost, LinkTimeout, Refused  # noqa: E402
 from xdrive.interface import FORMATS, JSON_ENDPOINT, VERSION_OFFSET, Interface  # noqa: E402
 from xdrive.model import Call, EndpointRef, Func, Prop, RwProp  # noqa: E402
 from xdrive.props import odrv  # noqa: E402
 from xdrive import usb as usb_link  # noqa: E402
+from xdrive import can as xcan  # noqa: E402
+from xdrive import endpoint_frame as ep_frame  # noqa: E402
+from xdrive import impedance_frame as imp_frame  # noqa: E402
 import usb.core as usb_core  # noqa: E402
 import usb.util as usb_util  # noqa: E402
 
@@ -384,3 +391,275 @@ def test_usb_reconnect_retries_while_the_board_enumerates(usb_device: FakeUsbDev
     monkeypatch.setattr(time, "sleep", lambda s: None)
     link.reconnect(timeout=5.0)
     assert len(attempts) == 3
+
+
+# ---- CAN: Bus and CanLink against fake boards on python-can's virtual bus ----
+
+class FakeCanBoard:
+    """A board on python-can's virtual bus: endpoint access answered like
+    src/communication/can/endpoint_frame.hpp over FakeLink's table, impedance commands answered with
+    their position, velocity and torque fields copied into the reply, and heartbeats every 20 ms.
+    save_configuration and reboot send no reply and leave the board silent for 0.2 s."""
+
+    def __init__(self, json_bytes: bytes, channel: str, node: int) -> None:
+        self.link = FakeLink(json_bytes)
+        for name, value in (("pos_range", 16.0), ("vel_range", 32.0), ("kp_max", 200.0), ("kd_max", 2.0),
+                            ("torque_range", 4.0)):
+            self.link.put(f"axis0.config.can.impedance_{name}", value)
+        self.node = node
+        self.answer_impedance = True
+        self.decoy = False       # send a reply for another endpoint before each real endpoint reply
+        self.json_frames = 0
+        self.down_until = 0.0
+        self.bus = python_can.Bus(interface="virtual", channel=channel)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _send(self, cmd: int, data: bytes) -> None:
+        self.bus.send(python_can.Message(arbitration_id=self.node << 5 | cmd, is_extended_id=False, data=data))
+
+    def _run(self) -> None:
+        next_heartbeat = 0.0
+        while not self._stop.is_set():
+            now = time.monotonic()
+            if now >= self.down_until and now >= next_heartbeat:
+                self._send(xcan.MSG_HEARTBEAT, struct.pack("<IBBBB", self.link.value("axis0.error"),
+                                                           self.link.value("axis0.current_state"), 0, 0, 0x80))
+                next_heartbeat = now + 0.02
+            msg = self.bus.recv(0.005)
+            if msg is None or time.monotonic() < self.down_until or msg.arbitration_id >> 5 != self.node:
+                continue
+            cmd, frame = msg.arbitration_id & 0x1F, bytes(msg.data)
+            if cmd == ep_frame.MSG_ENDPOINT:
+                reply = self._endpoint(frame)
+                if reply is not None:
+                    if self.decoy:
+                        other = struct.pack("<H", struct.unpack_from("<H", frame, 1)[0] ^ 1)
+                        self._send(cmd, bytes([frame[0] | 0x80]) + other + b"\0" + b"\xff" * 4)
+                        time.sleep(0.02)  # so a host that took the decoy has returned it before the real reply
+                    self._send(cmd, reply)
+            elif cmd == imp_frame.MSG_IMPEDANCE and self.answer_impedance:
+                torque = (frame[6] & 0xF) << 8 | frame[7]
+                self._send(cmd, frame[:3] + bytes([(frame[3] & 0xF0) | torque >> 8, torque & 0xFF,
+                                                   imp_frame.FLAG_ARMED, 30, 96]))
+
+    def _endpoint(self, f: bytes) -> bytes | None:
+        S = ep_frame.Status
+        op, eid, value = f[0], struct.unpack_from("<H", f, 1)[0], f[4:]
+        link = self.link
+
+        def reply(status: int, data: bytes = bytes(4)) -> bytes:
+            return bytes([op | 0x80]) + f[1:3] + bytes([status]) + data
+
+        known = eid == 0 or eid in link.by_id or eid in link.functions
+        if op == ep_frame.Op.READ_BUFFER:
+            if eid != JSON_ENDPOINT:
+                return reply(S.WRONG_KIND if known else S.UNKNOWN_ENDPOINT)
+            offset = struct.unpack("<I", value)[0]
+            if offset == VERSION_OFFSET:
+                return reply(S.OK, struct.pack("<I", interface.version_id(link.json)))
+            self.json_frames += 1
+            return reply(S.OK, link.json[offset:offset + 4].ljust(4, b"\0"))
+        if not known:
+            return reply(S.UNKNOWN_ENDPOINT)
+        if op == ep_frame.Op.CALL:
+            if eid not in link.functions:
+                return reply(S.WRONG_KIND)
+            try:
+                link.call(eid)
+            except LinkLost:  # save_configuration or reboot: the board resets before it replies
+                link.reconnect(0)
+                self.down_until = time.monotonic() + 0.2
+                return None
+            return reply(S.OK)
+        if eid not in link.by_id:
+            return reply(S.WRONG_KIND)
+        size = len(link.values[eid])
+        if size > 4:
+            return reply(S.UNSUPPORTED_TYPE)
+        if op == ep_frame.Op.WRITE:
+            if not link.by_id[eid].writable:
+                return reply(S.WRONG_KIND)
+            if any(value[size:]):
+                return reply(S.BAD_VALUE)
+            link.values[eid] = value[:size]
+        elif op != ep_frame.Op.READ:
+            return reply(S.BAD_OPCODE)
+        return reply(S.OK, link.values[eid].ljust(4, b"\0"))
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join()
+        self.bus.shutdown()
+
+
+@pytest.fixture
+def can_channel() -> str:
+    return f"xdrive-test-{uuid.uuid4()}"
+
+
+@pytest.fixture
+def fakes(json_bytes: bytes, can_channel: str) -> Iterator[list[FakeCanBoard]]:
+    boards = [FakeCanBoard(json_bytes, can_channel, node) for node in (1, 2)]
+    yield boards
+    for b in boards:
+        b.stop()
+
+
+@pytest.fixture
+def can_bus(can_channel: str, fakes: list[FakeCanBoard]) -> Iterator[xcan.Bus]:
+    # receive_own_messages: the host sees its own frames, as with a gs_usb adapter's echoes
+    with xcan.open(timeout=0.2, interface="virtual", channel=can_channel, receive_own_messages=True) as bus:
+        yield bus
+
+
+@pytest.fixture
+def cached_json(json_bytes: bytes, cache: pathlib.Path) -> None:
+    interface.store(json_bytes)
+
+
+def test_can_board_reads_writes_and_calls(can_bus: xcan.Bus, fakes: list[FakeCanBoard], cached_json: None) -> None:
+    board = can_bus.connect(1)
+    vel_limit = odrv.axis0.controller.config.vel_limit
+    assert board.describe() == "CAN node 1"
+    assert board.set(vel_limit, 7.5) == 7.5
+    assert board.get(vel_limit) == 7.5
+    assert fakes[0].link.value("axis0.controller.config.vel_limit") == 7.5
+    assert fakes[1].link.value("axis0.controller.config.vel_limit") == 0.0
+    assert board.set(odrv.axis0.controller.config.control_mode, ControlMode.TORQUE_CONTROL) \
+        is ControlMode.TORQUE_CONTROL
+    assert board.call(odrv.test_function(delta=3)) == 3
+    assert board.call(odrv.test_function(delta=-5)) == -2
+    fakes[0].decoy = True        # a reply for another endpoint on the node's ID is not this request's reply
+    assert board.get(vel_limit) == 7.5
+    with pytest.raises(Refused, match="out of reach"):
+        board.get(odrv.axis0.steps)  # int64
+    with pytest.raises(Refused, match="UNKNOWN_ENDPOINT"):
+        board.link.read(0x7000, 4)
+    with pytest.raises(Refused, match="WRONG_KIND"):
+        board.link.read(board.interface.functions["test_function"].id, 4)
+    board.close()
+    with pytest.raises(LinkLost, match="closed"):
+        board.get(vel_limit)
+
+
+def test_can_interface_json_is_read_4_bytes_at_a_time(can_bus: xcan.Bus, fakes: list[FakeCanBoard],
+                                                      json_bytes: bytes) -> None:
+    board = can_bus.connect(2)
+    assert board.interface.data == json_bytes
+    assert fakes[1].json_frames == len(json_bytes) // 4 + 1   # the last read ends in zeros
+    assert can_bus.connect(2).interface.data == json_bytes      # then from the cache
+    assert fakes[1].json_frames == len(json_bytes) // 4 + 1
+
+
+def test_can_missing_node_times_out(can_bus: xcan.Bus, cached_json: None) -> None:
+    t0 = time.monotonic()
+    with pytest.raises(LinkTimeout, match="node 5"):
+        can_bus.connect(5)
+    assert time.monotonic() - t0 < 1.0
+    with pytest.raises(ValueError):
+        can_bus.connect(64)
+
+
+def test_can_heartbeats_and_scan(can_bus: xcan.Bus, fakes: list[FakeCanBoard]) -> None:
+    fakes[0].link.put("axis0.current_state", 8)
+    fakes[0].link.put("axis0.error", 0x41)
+    assert can_bus.scan(0.1) == [1, 2]
+    hb = can_bus.heartbeat(1)
+    assert hb is not None and hb.state is AxisState.CLOSED_LOOP_CONTROL
+    assert hb.axis_error == AxisError.INVALID_STATE | AxisError.MOTOR_FAILED
+    assert hb.trajectory_done and not hb.motor_error
+    assert can_bus.heartbeat(5) is None
+    fakes[1].stop()
+    assert can_bus.scan(0.1) == [1]
+
+
+def test_can_cycle_lifecycle(can_bus: xcan.Bus, fakes: list[FakeCanBoard], cached_json: None) -> None:
+    """Connect two joints, command them for 50 cycles, lose one, change ranges, save and keep going."""
+    with pytest.raises(KeyError, match=r"\[1\]"):
+        can_bus.cycle({1: xcan.Impedance(0.0)}, timeout=0.01)
+    j1, j2 = can_bus.connect(1), can_bus.connect(2)
+    assert can_bus.ranges[1] == imp_frame.Ranges()
+    j1.set(odrv.axis0.requested_state, AxisState.CLOSED_LOOP_CONTROL)
+    for i in range(50):
+        replies = can_bus.cycle({1: xcan.Impedance(pos=0.01 * i, vel=1.0, kp=20.0, torque=0.5),
+                                 2: xcan.Impedance(pos=-3.0)}, timeout=0.5)
+        r1, r2 = replies[1], replies[2]
+        assert r1 is not None and r2 is not None
+        assert abs(r1.pos - 0.01 * i) < 0.001 and abs(r1.vel - 1.0) < 0.02 and abs(r1.torque - 0.5) < 0.002
+        assert r1.armed and not r1.error and r1.vbus == 24.0
+        assert abs(r2.pos + 3.0) < 0.001 and r2.torque == 0.0
+
+    fakes[1].answer_impedance = False    # node 2 stops answering; its own echoed command is not a reply
+    t0 = time.monotonic()
+    replies = can_bus.cycle({1: xcan.Impedance(pos=1.0), 2: xcan.Impedance(pos=1.0)}, timeout=0.05)
+    assert replies[1] is not None and replies[2] is None
+    assert 0.05 <= time.monotonic() - t0 < 0.5
+
+    j1.set(odrv.axis0.config.can.impedance_pos_range, 4.0)
+    j1 = can_bus.connect(1)               # rereads the ranges
+    assert can_bus.ranges[1].pos == 4.0
+    reply = can_bus.cycle({1: xcan.Impedance(pos=1.0)}, timeout=0.5)[1]
+    assert reply is not None and abs(reply.pos - 1.0) < 0.0002
+
+    fakes[0].link.armed = True
+    with pytest.raises(Refused, match="armed"):
+        j1.save()
+    fakes[0].link.armed = False
+    j1.save()                              # no reply, the node goes silent, then answers with a reset uptime
+    assert j1.get(odrv.system_stats.uptime) == 120
+    reply = can_bus.cycle({1: xcan.Impedance(pos=1.0)}, timeout=0.5)[1]
+    assert reply is not None and abs(reply.pos - 1.0) < 0.0002
+    j2.close()
+
+
+def test_can_bus_failure_raises_link_lost(can_bus: xcan.Bus, cached_json: None,
+                                          monkeypatch: pytest.MonkeyPatch) -> None:
+    board = can_bus.connect(1)
+
+    def unplugged(timeout: float) -> None:
+        raise python_can.CanOperationError("adapter unplugged")
+
+    monkeypatch.setattr(can_bus._bus, "recv", unplugged)
+    with pytest.raises(LinkLost, match="unplugged"):
+        for _ in range(100):               # until the reader's next recv fails
+            board.get(odrv.vbus_voltage)
+    with pytest.raises(LinkLost, match="unplugged"):
+        can_bus.cycle({1: xcan.Impedance(0.0)}, timeout=0.05)
+
+
+def test_can_reconnect_retries_send_errors(can_bus: xcan.Bus, monkeypatch: pytest.MonkeyPatch) -> None:
+    link = xcan.CanLink(can_bus, 1)
+    real_send = can_bus._bus.send
+    failures: list[python_can.Message] = []
+
+    def send(msg: python_can.Message, timeout: float | None = None) -> None:
+        if len(failures) < 3:            # nothing acknowledges the frames while the node reboots
+            failures.append(msg)
+            raise python_can.CanOperationError("transmit buffer full")
+        real_send(msg, timeout)
+
+    monkeypatch.setattr(can_bus._bus, "send", send)
+    link.reconnect(timeout=2.0)
+    assert len(failures) == 3
+
+
+def test_can_close_ends_requests_in_flight(can_bus: xcan.Bus) -> None:
+    link = xcan.CanLink(can_bus, 5, timeout=5.0)    # no node 5: the request waits for its timeout
+    raised: list[BaseException] = []
+
+    def request() -> None:
+        try:
+            link.read(2, 4)
+        except BaseException as ex:
+            raised.append(ex)
+
+    t = threading.Thread(target=request)
+    t0 = time.monotonic()
+    t.start()
+    time.sleep(0.1)
+    can_bus.close()
+    t.join()
+    assert len(raised) == 1 and isinstance(raised[0], LinkLost)
+    assert time.monotonic() - t0 < 1.0

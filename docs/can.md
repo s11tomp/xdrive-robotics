@@ -117,11 +117,11 @@ Signed fields map [−range, +range] to two's complement, with +range at 2^(bits
 
 Reply flags: bit 0 armed (closed loop, motor armed), bit 1 any axis, motor, encoder or controller error, bit 2 watchdog hold active ([Safety and regen](safety-and-regen.md#watchdog-decelerate-and-hold)).
 
-**From Python** with [python-can](https://python-can.readthedocs.io) and the host codec `tools/impedance_frame.py` (no I/O of its own):
+**From Python:** the [host library](python-library.md#can) does this for several joints per cycle (`bus.cycle()`). Without it, with [python-can](https://python-can.readthedocs.io) and the host codec `tools/xdrive/impedance_frame.py` (no I/O of its own):
 
 ```python
-import can                 # python-can; run with tools/ on PYTHONPATH for impedance_frame
-from impedance_frame import Ranges, arbitration_id, decode_reply, encode_command
+import can                 # python-can; run with tools/ on PYTHONPATH for xdrive
+from xdrive.impedance_frame import Ranges, arbitration_id, decode_reply, encode_command
 
 ranges = Ranges()          # must match the board's axis0.config.can.impedance_*
 node = 1
@@ -138,7 +138,7 @@ The reply uses the command's ID, so a host commanding several joints collects on
 
 ## Endpoint access (0x1F)
 
-The host reads or writes any property, or calls any function, by its endpoint ID: the `id` of the property in the board's interface JSON, the same table USB uses. It can also read the interface JSON itself and the [capture](capture.md) buffer. The board answers each request at once on the same ID. Source: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/endpoint_frame.py`.
+The host reads or writes any property, or calls any function, by its endpoint ID: the `id` of the property in the board's interface JSON, the same table USB uses. It can also read the interface JSON itself and the [capture](capture.md) buffer. The board answers each request at once on the same ID. Source: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/xdrive/endpoint_frame.py`.
 
 | Bytes | Request | Reply |
 |---|---|---|
@@ -170,37 +170,19 @@ Values are the property's little-endian bytes, zero-padded to 4: a `float` is 4 
 
 Changes made this way are in RAM until `save_configuration` is called. Requests run in the board's CAN thread with the same handlers as USB, so a write over CAN has the same effect as the same write over USB.
 
-**From Python** (`tools/` on PYTHONPATH):
+**From Python**, with the [host library](python-library.md#can) (`tools/` on PYTHONPATH), which caches the interface JSON per version ID:
 
 ```python
-import json
-import can
-import endpoint_frame as ep
+from xdrive import can
+from xdrive.props import odrv
 
-node = 1
-arb_id = node << 5 | ep.MSG_ENDPOINT
-
-
-def transact(bus, frame):
-    bus.send(can.Message(arbitration_id=arb_id, is_extended_id=False, data=frame))
-    while (msg := bus.recv(timeout=0.1)) is not None:
-        if msg.arbitration_id == arb_id:
-            return ep.decode_reply(msg.data)
-    raise TimeoutError(f"node {node}: no endpoint reply")
-
-
-with can.Bus(interface="socketcan", channel="can0", bitrate=1000000) as bus:
-    chunks, offset = [], 0
-    while not chunks or 0 not in chunks[-1]:   # the JSON ends at the first zero byte
-        chunks.append(transact(bus, ep.read_buffer_request(ep.JSON_ENDPOINT, offset)).data)
-        offset += 4
-    names = ep.endpoints(json.loads(b"".join(chunks).split(b"\0")[0]))
-
-    gain = names["axis0.controller.config.vel_gain"]
-    reply = transact(bus, ep.write_request(gain.id, gain.type, 0.05))
-    assert reply.status == ep.Status.OK, reply.status
-    print("vel_gain is now", ep.unpack(gain.type, reply.data))
+with can.open(interface="socketcan", channel="can0", bitrate=1000000) as bus:
+    board = bus.connect(1)
+    print(board.set(odrv.axis0.controller.config.vel_gain, 0.05))   # the value read back after the write
+    board.save()                                                    # stores the config; the board reboots
 ```
+
+`tools/xdrive/can.py` is also the reference client for this message: request matching, timeouts and the reconnect after a reboot.
 
 ## Bus load
 
@@ -217,8 +199,8 @@ The default cyclic messages add 660 frames per second for six boards (heartbeat 
 
 `docs/cansimple.dbc` describes every message above for cantools, SavvyCAN and other DBC readers, once per node ID 0 to 7 (`Node3_Set_Input_Pos` is ID 3 << 5 | 0x00C). `make generate` writes it from `tools/gen_dbc.py`, and `make test` checks it against the host codec.
 
-- **The impedance command** (`NodeN_Impedance`) is in it with scales for the default `impedance_*` ranges. A DBC holds one layout per ID, so the reply on the same ID isn't: decode replies with `tools/impedance_frame.py`.
-- **Endpoint access** (`NodeN_Endpoint`) is in it as the request (opcode, endpoint ID, value). Its reply, on the same ID, isn't: decode it with `tools/endpoint_frame.py`.
+- **The impedance command** (`NodeN_Impedance`) is in it with scales for the default `impedance_*` ranges. A DBC holds one layout per ID, so the reply on the same ID isn't: decode replies with `tools/xdrive/impedance_frame.py`.
+- **Endpoint access** (`NodeN_Endpoint`) is in it as the request (opcode, endpoint ID, value). Its reply, on the same ID, isn't: decode it with `tools/xdrive/endpoint_frame.py`.
 - **Get messages** are defined as the board's reply. The host's request is a remote frame (RTR) with the same ID; `Get_ADC_Voltage`'s request carries the GPIO number in byte 0.
 - `examples/can_dbc.py` (Motor moves) drives one board with python-can and the database: closed loop, a slow sine on `input_pos`, then IDLE.
 

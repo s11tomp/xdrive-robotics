@@ -23,6 +23,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 ### Changed
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
 - The CAN thread's stack is 4 KB, the USB thread's size (ODrive: 1 KB): endpoint access runs the same handlers as USB.
+- The brake resistor's PWM (TIM2) runs at 16 kHz, restarted by every TIM1 update event, so its edges stay at least 1.1 us from each current sample. Running free at 10.25 kHz, its edges crossed the samples several times a second and corrupted those readings by up to 2.2 A for one control period.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
 - Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
 - The second motor's gate drive and gate driver chip select pins are in analog mode; the Mini leaves them unconnected.

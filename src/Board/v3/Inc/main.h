@@ -63,7 +63,11 @@
 #define TIM_1_PERIOD_CLOCKS 3500
 #define TIM_1_DEADTIME_CLOCKS 20
 #define TIM_APB1_CLOCK_HZ 84000000
-#define TIM_APB1_PERIOD_CLOCKS 4096
+// Brake timer (TIM2), center-aligned: 2 x 2625 ticks at 84 MHz = 62.5 us, the time between TIM1
+// update events, which restart it (tim.c). Its edges then keep a fixed distance from the current
+// samples, which a brake edge in the ADC's sample and conversion (about 0.5 us after each TIM1
+// update) would corrupt.
+#define TIM_APB1_PERIOD_CLOCKS 2625
 #define TIM_APB1_DEADTIME_CLOCKS 40
 #define TIM_1_RCR 2
 

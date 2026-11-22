@@ -170,6 +170,17 @@ void MX_TIM2_Init(void)
     _Error_Handler(__FILE__, __LINE__);
   }
 
+  // XDRIVE: every TIM1 update event (TRGO, internal trigger ITR0) restarts TIM2's count, so TIM2's
+  // bottom coincides with each current sample and its edges, centered on its top, stay at least 91
+  // ticks (1.1 us, at the 95 % duty cap) away from them.
+  TIM_SlaveConfigTypeDef sSlaveConfig = {};
+  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
+  sSlaveConfig.InputTrigger = TIM_TS_ITR0;
+  if (HAL_TIM_SlaveConfigSynchronization(&htim2, &sSlaveConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
   sConfigOC.OCMode = TIM_OCMODE_PWM2;
   sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;

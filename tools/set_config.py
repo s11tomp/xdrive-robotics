@@ -3,6 +3,7 @@
 
   python tools/set_config.py [--save] path=value [path=value ...]
   python tools/set_config.py [--save] --file configs/<board>.json [path=value ...]
+  python tools/set_config.py --save
   e.g. python tools/set_config.py --save axis0.encoder.config.calib_range=0.05
 
 - Refuses unless axis0 is IDLE (nothing is driving the motor).
@@ -14,7 +15,8 @@
   restores a board's own calibration results (R/L, encoder offset, pre_calibrated) after a flash
   that reset its config, without moving the motor. Backup keys the board's firmware doesn't have
   (e.g. from an older firmware) are skipped and listed. Assignments on the command line are applied after it.
-- --save calls save_configuration().
+- --save calls save_configuration(). Alone (no assignments, no --file) it saves the board's current RAM config,
+  which is how to keep what the RAM-only tools wrote (e.g. correction_table.py).
   - v0.5.1: writes flash and does NOT reboot. The flash write breaks PWM/ADC timing until a
     reboot, so reboot before moving.
   - v0.5.2+ (this firmware): the board saves and reboots by itself, and THE STARTUP SEQUENCE
@@ -52,14 +54,19 @@ def parse(prop, text):
     return t(float(text)) if t is int else t(text)
 
 
-def main():
+def parse_args(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--save", action="store_true", help="save_configuration() after writing")
+    ap.add_argument("--save", action="store_true", help="save_configuration() after writing (alone: saves the current RAM config)")
     ap.add_argument("--file", help='JSON file {"settings": {path: value}} or a *_config-backup.json, applied before the assignments')
     ap.add_argument("assignments", nargs="*", metavar="path=value")
-    args = ap.parse_args()
-    if not args.file and not args.assignments:
-        ap.error("nothing to set")
+    args = ap.parse_args(argv)
+    if not (args.file or args.assignments or args.save):
+        ap.error("nothing to do: give path=value, --file, or --save")
+    return args
+
+
+def main():
+    args = parse_args()
     pairs = []
     backup_paths = set()  # keys from a config backup; skipped when the board's firmware doesn't have them
     if args.file:
@@ -135,6 +142,8 @@ def main():
 
     saved = False
     if args.save:
+        if not changes:
+            print("no settings given: saving the board's current RAM config")
         if all(c["ok"] for c in changes):
             reboots = (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) >= (0, 5, 2)
             try:

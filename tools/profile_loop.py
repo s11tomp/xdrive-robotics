@@ -16,7 +16,9 @@ import statistics
 import sys
 import time
 
-from dump_board import connect
+from xdrive import paths, usb
+from xdrive.enums import AxisState
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -25,40 +27,47 @@ PERIOD_CYCLES = CLOCK_HZ / 8000.0          # 21000 cycles per control iteration
 WRAP = 65536                               # sample_TIM13() returns uint16
 
 
-def timers(obj, prefix):
-    """{name: TaskTimer remote object} under obj.task_times."""
-    tt = obj.task_times
-    return {f"{prefix}{k}": getattr(tt, k) for k in tt._remote_attributes}
+def timers(prefix):
+    """{task name: (length, start_time, end_time) handles} of the TaskTimers under <prefix>task_times."""
+    out = {}
+    for path in paths.HANDLES:
+        if path.startswith(prefix + "task_times.") and path.endswith(".length"):
+            base = path[:-len(".length")]
+            out[prefix + base[len(prefix + "task_times."):]] = tuple(
+                paths.prop(f"{base}.{f}") for f in ("length", "start_time", "end_time"))
+    return out
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--samples", type=int, default=200)
     args = ap.parse_args()
-    dev = connect(timeout=10)
-    ax = dev.axis0
-    serial = format(dev.serial_number, "X")
-    tmap = {**timers(dev, ""), **timers(ax, "axis0.")}
-    stats = dev.system_stats
-    stacks = {k[len("max_stack_usage_"):]: (getattr(stats, k), getattr(stats, "stack_size_" + k[len("max_stack_usage_"):], None))
-              for k in stats._remote_attributes if k.startswith("max_stack_usage_")}
+    b = usb.connect()
+    ax = odrv.axis0
+    serial = format(b.get(odrv.serial_number), "X")
+    tmap = {**timers(""), **timers("axis0.")}
+    names = [p[len("system_stats.max_stack_usage_"):] for p in paths.HANDLES
+             if p.startswith("system_stats.max_stack_usage_")]
+    stacks = {n: (paths.get(b, f"system_stats.max_stack_usage_{n}"),
+                  paths.get(b, f"system_stats.stack_size_{n}") if f"system_stats.stack_size_{n}" in paths.HANDLES
+                  else None) for n in names}
 
-    lengths = {k: [] for k in tmap}
+    lengths: dict[str, list[int]] = {k: [] for k in tmap}
     busy = []
     try:
-        ax.requested_state = 8
+        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
         time.sleep(0.8)
-        if ax.current_state != 8:
-            raise SystemExit(f"axis0 did not enter closed loop (state {ax.current_state})")
+        if b.get(ax.current_state) is not AxisState.CLOSED_LOOP_CONTROL:
+            raise SystemExit(f"axis0 did not enter closed loop (state {b.get(ax.current_state).name})")
         for _ in range(args.samples):
-            dev.task_timers_armed = True
+            b.set(odrv.task_timers_armed, True)
             t0 = time.monotonic()
-            while dev.task_timers_armed and time.monotonic() - t0 < 0.5:
+            while b.get(odrv.task_timers_armed) and time.monotonic() - t0 < 0.5:
                 pass
             starts, ends = [], []
             ref = None
             for k, t in tmap.items():
-                ln, st, en = t.length, t.start_time, t.end_time
+                ln, st, en = (b.get(p) for p in t)
                 if ln == 0 and st == 0:
                     continue                      # task didn't run this iteration
                 lengths[k].append(ln)
@@ -68,7 +77,7 @@ def main():
             if starts:
                 busy.append(max(ends) - min(starts))
     finally:
-        ax.requested_state = 1
+        b.set(ax.requested_state, AxisState.IDLE)
     us = lambda c: c / CLOCK_HZ * 1e6
     print(f"board {serial}, {args.samples} control iterations timed while holding in closed loop")
     rows = []
@@ -84,12 +93,13 @@ def main():
     for name, (used, size) in stacks.items():
         print(f"  {name:10s} {used:6d} / {size if size is not None else '?'}"
               + (f"   ({used / size * 100:.0f} %)" if size else ""))
-    print(f"min heap free: {stats.min_heap_space} bytes; uptime {stats.uptime / 1000:.0f} s")
+    min_heap = b.get(odrv.system_stats.min_heap_space)
+    print(f"min heap free: {min_heap} bytes; uptime {b.get(odrv.system_stats.uptime) / 1000:.0f} s")
     out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "samples": args.samples,
            "tasks_us": {k: {"mean": us(m), "max": us(x)} for k, m, x in rows},
            "busy_us": {"mean": us(b_mean), "max": us(b_max)}, "period_us": us(PERIOD_CYCLES),
            "stacks": {k: {"max_used": u, "size": s} for k, (u, s) in stacks.items()},
-           "min_heap_space": stats.min_heap_space}
+           "min_heap_space": min_heap}
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     LOGS.mkdir(exist_ok=True)
     (LOGS / f"{stamp}_{serial}_profile-loop.json").write_text(json.dumps(out, indent=2) + "\n")

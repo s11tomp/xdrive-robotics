@@ -24,7 +24,7 @@ import pytest
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
-from xdrive import interface, report  # noqa: E402
+from xdrive import interface, paths, report  # noqa: E402
 from xdrive.board import Board, load_interface  # noqa: E402
 from xdrive.enums import AxisError, AxisState, ControlMode, MotorError  # noqa: E402
 from xdrive.errors import InterfaceMismatch, LinkLost, LinkTimeout, Refused  # noqa: E402
@@ -258,6 +258,26 @@ def test_report_decodes_every_bit(json_bytes: bytes) -> None:
     assert report.line(errs["axis"]) == "0x80000041 INVALID_STATE | MOTOR_FAILED | unknown 0x80000000"
     assert report.jsonable(errs["axis"])["unknown_bits"] == "0x80000000"
     assert report.line(errs["encoder"]) == "0x00000000"
+
+
+def test_paths_give_plain_values_and_take_json_values(json_bytes: bytes) -> None:
+    link = FakeLink(json_bytes)
+    board = Board(link)
+    assert set(paths.HANDLES) == set(Interface(json_bytes).properties)
+    link.put("axis0.current_state", 8)
+    link.put("axis0.error", 0x41)
+    assert paths.get(board, "axis0.current_state") == 8 and type(paths.get(board, "axis0.current_state")) is int
+    assert paths.get(board, "axis0.error") == 0x41 and type(paths.get(board, "axis0.error")) is int
+    assert paths.set(board, "axis0.controller.config.control_mode", 3) == 3          # an int for an enum
+    assert link.value("axis0.controller.config.control_mode") == 3
+    assert paths.set(board, "axis0.controller.config.vel_limit", 4) == 4.0           # an int for a float
+    assert paths.read(board, [odrv.axis0.current_state, odrv.vbus_voltage]) == [8, 0.0]
+    with pytest.raises(TypeError):
+        paths.set(board, "axis0.config.enable_watchdog", 1)                          # bools stay strict
+    with pytest.raises(KeyError, match="read-only"):
+        paths.set(board, "vbus_voltage", 1.0)
+    with pytest.raises(KeyError, match="no property"):
+        paths.get(board, "axis0.fet_thermistor.temperature")                         # a v0.5.1 name
 
 
 def test_enums_are_strict() -> None:

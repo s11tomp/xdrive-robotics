@@ -13,6 +13,10 @@ PYTHON   := $(ROOT).venv/bin/python
 HOST_CXX ?= c++
 
 .PHONY: all asm size clean test generate venv
+
+# Host tools on the xdrive library, type-checked by `make test` (mypy.ini relaxes annotations for the bench tools).
+XDRIVE_TOOLS = idle.py correction_table.py brake_check.py calibrate.py move_to.py profile_loop.py reboot_watch.py \
+	spike_hunt.py usb_flash.py swd_flash.py
 all asm size clean: venv
 	$(MAKE) -C $(ROOT)src PYTHON=$(PYTHON) $@
 
@@ -21,7 +25,7 @@ test: venv
 	cd $(ROOT)src && $(HOST_CXX) -std=c++17 -O2 -I. -IMotorControl -Ifibre-cpp/include -IDrivers/DRV8301 -Itests/doctest \
 		tests/*.cpp -o ../build/tests/unit_tests
 	$(ROOT)build/tests/unit_tests
-	cd $(ROOT) && $(PYTHON) -m mypy tools/xdrive tools/tests/test_xdrive.py tools/idle.py tools/correction_table.py
+	cd $(ROOT) && $(PYTHON) -m mypy tools/xdrive tools/tests/test_xdrive.py $(addprefix tools/,$(XDRIVE_TOOLS))
 	cd $(ROOT) && $(PYTHON) -m pytest -q tools/tests
 
 generate: venv

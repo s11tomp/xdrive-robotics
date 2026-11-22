@@ -119,7 +119,7 @@ def readback_check(segs, touched, pre, post):
     """Compare a whole-flash read after programming with the image and the pre-flash read."""
     erased = [(a - FLASH_BASE, s) for a, s in touched]
     def in_erased(o): return any(eo <= o < eo + es for eo, es in erased)
-    covered = set()
+    covered: set[int] = set()
     for a, d in segs:
         covered.update(range(a - FLASH_BASE, a - FLASH_BASE + len(d)))
     return {"post_sha256": hashlib.sha256(post).hexdigest(),
@@ -130,14 +130,19 @@ def readback_check(segs, touched, pre, post):
 
 
 def board_on_usb():
-    import odrive
-    from odrive.enums import AXIS_STATE_IDLE
-    dev = odrive.find_any(timeout=10)
-    if dev is None:
+    """(serial, axis0 state after an IDLE request) of the board running this firmware on USB, or (None, None)."""
+    from xdrive import usb as xusb
+    from xdrive.enums import AxisState
+    from xdrive.errors import LinkError
+    from xdrive.props import odrv
+    try:
+        b = xusb.connect()
+    except LinkError:
         return None, None
-    dev.axis0.requested_state = AXIS_STATE_IDLE
-    time.sleep(0.3)
-    return format(dev.serial_number, "X"), dev.axis0.current_state
+    with b:
+        b.set(odrv.axis0.requested_state, AxisState.IDLE)
+        time.sleep(0.3)
+        return format(b.get(odrv.serial_number), "X"), b.get(odrv.axis0.current_state).value
 
 
 def log(record):
@@ -177,7 +182,8 @@ def main():
     if not args.no_usb:
         usb_serial, state = board_on_usb()
         if usb_serial is None:
-            raise SystemExit("Board not found on USB (use --no-usb to proceed without the cross-check and IDLE).")
+            raise SystemExit("No board running this firmware on USB (use --no-usb to proceed without the cross-check "
+                             "and IDLE, for example for a board on Makerbase's firmware: stop its motor first).")
         if usb_serial != info["serial"]:
             raise SystemExit(f"USB board serial {usb_serial} != SWD chip serial {info['serial']}. Stop.")
         print(f"USB: same board ({usb_serial}); axis0 state now {state} (1 = IDLE)")

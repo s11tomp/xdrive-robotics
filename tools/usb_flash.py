@@ -27,11 +27,16 @@ import datetime
 import hashlib
 import sys
 import time
+from typing import Any
 
 import usb.core
 import usb.util
 
-from dump_board import connect
+from xdrive import usb as xusb
+from xdrive.board import Board
+from xdrive.enums import AxisState
+from xdrive.errors import LinkError, LinkLost, LinkTimeout
+from xdrive.props import odrv
 from swd_backup import FLASH_BASE, NVM_START
 from swd_flash import WORKDIR, SECTORS, compare, load_segments, log, readback_check, save_backup, sectors_touched
 
@@ -41,7 +46,6 @@ LAYOUT = "@Internal Flash  /0x08000000/04*016Kg,01*064Kg,07*128Kg"  # alternate 
 DNLOAD, UPLOAD, GETSTATUS, CLRSTATUS, ABORT = 1, 2, 3, 4, 6
 DFU_IDLE, DNLOAD_SYNC, DNBUSY, DNLOAD_IDLE, MANIFEST_SYNC, MANIFEST, UPLOAD_IDLE, DFU_ERROR = 2, 3, 4, 5, 6, 7, 9, 10
 OUT, IN = 0x21, 0xA1
-AXIS_IDLE, AXIS_CLOSED_LOOP = 1, 8
 
 
 class DfuError(Exception):
@@ -139,25 +143,46 @@ def find_dfu(serial=None, timeout=0.0):
         time.sleep(0.2)
 
 
+def connect_firmware(serial=None, timeout=10.0) -> Board:
+    """The board running this firmware on USB, waiting up to `timeout` s for it to enumerate."""
+    t0 = time.monotonic()
+    while True:
+        try:
+            return xusb.connect(serial)
+        except LinkError:
+            if time.monotonic() - t0 >= timeout:
+                raise
+            time.sleep(0.2)
+
+
+def version(b: Board) -> str:
+    return f"{b.get(odrv.fw_version_major)}.{b.get(odrv.fw_version_minor)}.{b.get(odrv.fw_version_revision)}"
+
+
 def enter_bootloader():
-    """Board running firmware -> IDLE -> enter_dfu_mode(); returns (serial, usb device in DFU, firmware version)."""
-    dev = connect(timeout=10)
-    if dev is None:
-        raise SystemExit("Board not found on USB, as an ODrive or in DFU mode.")
-    serial = format(dev.serial_number, "X")
-    fw = f"{dev.fw_version_major}.{dev.fw_version_minor}.{dev.fw_version_revision}"
-    hw = (dev.hw_version_major, dev.hw_version_minor)
+    """Board running this firmware -> IDLE -> enter_dfu_mode(); returns (serial, usb device in DFU, firmware version).
+
+    A board on Makerbase's firmware can't be reached this way: put it in DFU mode first, or flash it over SWD."""
+    try:
+        b = connect_firmware()
+    except LinkError as ex:
+        raise SystemExit(f"Board not found on USB running this firmware, nor in DFU mode ({ex}).")
+    serial = format(b.get(odrv.serial_number), "X")
+    fw = version(b)
+    hw = (b.get(odrv.hw_version_major), b.get(odrv.hw_version_minor))
     if hw < (3, 5):
         raise SystemExit(f"hw_version {hw}: the firmware refuses enter_dfu_mode() below 3.5. Stop.")
-    dev.axis0.requested_state = AXIS_IDLE
+    b.set(odrv.axis0.requested_state, AxisState.IDLE)
     time.sleep(0.3)
-    if dev.axis0.current_state != AXIS_IDLE:
-        raise SystemExit(f"Axis didn't go IDLE (state {dev.axis0.current_state}). Stop.")
+    state = b.get(odrv.axis0.current_state)
+    if state is not AxisState.IDLE:
+        raise SystemExit(f"Axis didn't go IDLE (state {state.name}). Stop.")
     print(f"USB: board {serial}, fw {fw}, hw {hw[0]}.{hw[1]}, axis0 IDLE. Entering the bootloader...")
     try:
-        dev.enter_dfu_mode()
-    except Exception:  # the board resets mid-call; the channel breaks
+        b.call(odrv.enter_dfu_mode())
+    except (LinkLost, LinkTimeout):  # the board resets mid-call
         pass
+    b.close()
     dfu = find_dfu(serial, timeout=10)
     if dfu is None:
         raise SystemExit("The board didn't appear in DFU mode within 10 s.")
@@ -166,15 +191,19 @@ def enter_bootloader():
 
 def wait_for_firmware(serial, timeout=40):
     """After leaving the bootloader: wait for the board on USB and for its startup sequence to settle."""
-    dev = connect(serial_number=serial, timeout=15)
-    if dev is None:
+    try:
+        b = connect_firmware(serial, timeout=15)
+    except LinkError:
         return {"back_on_usb": False}
-    t0 = time.monotonic()
-    while dev.axis0.current_state not in (AXIS_IDLE, AXIS_CLOSED_LOOP) and time.monotonic() - t0 < timeout:
-        time.sleep(0.2)
-    return {"back_on_usb": True, "fw_version": f"{dev.fw_version_major}.{dev.fw_version_minor}.{dev.fw_version_revision}",
-            "axis_state": dev.axis0.current_state, "odrv_error": dev.error, "axis_error": dev.axis0.error,
-            "motor_error": dev.axis0.motor.error, "encoder_error": dev.axis0.encoder.error}
+    with b:
+        ax = odrv.axis0
+        t0 = time.monotonic()
+        while (b.get(ax.current_state) not in (AxisState.IDLE, AxisState.CLOSED_LOOP_CONTROL)
+               and time.monotonic() - t0 < timeout):
+            time.sleep(0.2)
+        return {"back_on_usb": True, "fw_version": version(b), "axis_state": b.get(ax.current_state).value,
+                "odrv_error": int(b.get(odrv.error)), "axis_error": int(b.get(ax.error)),
+                "motor_error": int(b.get(ax.motor.error)), "encoder_error": int(b.get(ax.encoder.error))}
 
 
 def main():
@@ -196,7 +225,7 @@ def main():
         print("NOTE: the image covers the config sectors (10-11): the board's saved config gets replaced too.")
 
     # 1. Find the board.
-    record = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "usb_flash" if args.write else "usb_flash_dry_run",
+    record: dict[str, Any] = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "usb_flash" if args.write else "usb_flash_dry_run",
               "image": str(path), "image_sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "image_bytes": total,
               "sectors": [SECTORS.index(t) for t in touched]}
     t0 = time.monotonic()

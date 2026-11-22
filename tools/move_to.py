@@ -12,55 +12,57 @@ import argparse
 import sys
 import time
 
-from dump_board import connect
-
-AXIS_STATE_IDLE, AXIS_STATE_CLOSED_LOOP_CONTROL, INPUT_MODE_TRAP_TRAJ = 1, 8, 5
+from xdrive import report, usb
+from xdrive.enums import AxisState, InputMode
+from xdrive.errors import LinkError
+from xdrive.props import odrv
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("fraction", type=float, help="fractional turn, 0..1")
     args = ap.parse_args()
-    dev = connect(timeout=10)
-    if dev is None:
-        print("No board found on USB.")
+    try:
+        b = usb.connect()
+    except LinkError as ex:
+        print(ex)
         return 1
-    ax = dev.axis0
+    ax = odrv.axis0
 
     def errors():
-        return {n: e for n, e in (("axis", ax.error), ("motor", ax.motor.error), ("encoder", ax.encoder.error),
-                                  ("controller", ax.controller.error)) if e}
+        return {n: report.line(e) for n, e in report.errors(b).items() if e}
 
     if errors():
         print(f"Not moving: errors {errors()}")
         return 2
-    if ax.controller.config.input_mode != INPUT_MODE_TRAP_TRAJ:
-        print(f"Not moving: needs input_mode TRAP_TRAJ ({INPUT_MODE_TRAP_TRAJ}), not {ax.controller.config.input_mode}")
+    mode = b.get(ax.controller.config.input_mode)
+    if mode is not InputMode.TRAP_TRAJ:
+        print(f"Not moving: needs input_mode TRAP_TRAJ, not {mode.name}")
         return 2
-    pos = ax.encoder.pos_estimate
+    pos = b.get(ax.encoder.pos_estimate)
     target = pos + (args.fraction - pos) % 1.0
     if target - pos > 0.5:
         target -= 1.0
     try:
-        ax.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
         t0 = time.monotonic()
-        while ax.current_state != AXIS_STATE_CLOSED_LOOP_CONTROL:
+        while b.get(ax.current_state) is not AxisState.CLOSED_LOOP_CONTROL:
             if errors() or time.monotonic() - t0 > 3.0:
-                print(f"Closed loop not reached: state {ax.current_state}, errors {errors()}")
+                print(f"Closed loop not reached: state {b.get(ax.current_state).name}, errors {errors()}")
                 return 3
             time.sleep(0.02)
-        ax.controller.input_pos = target
+        b.set(ax.controller.input_pos, target)
         time.sleep(0.1)
         t0 = time.monotonic()
-        while not ax.controller.trajectory_done:
+        while not b.get(ax.controller.trajectory_done):
             if errors() or time.monotonic() - t0 > 5.0:
                 print(f"Move to {target:.4f} failed: errors {errors()}")
                 return 3
             time.sleep(0.02)
         time.sleep(0.5)
-        reached = ax.encoder.pos_estimate
+        reached = b.get(ax.encoder.pos_estimate)
     finally:
-        ax.requested_state = AXIS_STATE_IDLE
+        b.set(ax.requested_state, AxisState.IDLE)
     print(f"rotor moved {pos:.4f} -> {reached:.4f} turn (target {target:.4f}); axis IDLE")
     return 0
 

@@ -32,11 +32,13 @@ import pathlib
 import sys
 import time
 
-from dump_board import connect
+from xdrive import usb
+from xdrive.enums import AxisState, ControlMode, InputMode
+from xdrive.props import odrv
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
-CLOSED_LOOP, IDLE = 8, 1
+CLOSED_LOOP, IDLE = AxisState.CLOSED_LOOP_CONTROL, AxisState.IDLE
 
 
 def find_spikes(ts, xs, threshold):
@@ -57,64 +59,73 @@ def main():
     ap.add_argument("--quiet", action="store_true", help="no USB current reads during the hold (firmware counter only)")
     ap.add_argument("--adc1", choices=("on", "off"), default="on", help="ADC1 free-running scan during the hold")
     args = ap.parse_args()
-    dev = connect(timeout=10)
-    ax = dev.axis0
-    cc = ax.motor.current_control
-    serial = format(dev.serial_number, "X")
+    b = usb.connect()
+    ax = odrv.axis0
+    cc, ec = ax.motor.current_control, ax.encoder.config
+    serial = format(b.get(odrv.serial_number), "X")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    saved = {"input_mode": ax.controller.config.input_mode, "trap_vel": ax.trap_traj.config.vel_limit}
+    saved_input_mode, saved_trap_vel = b.get(ax.controller.config.input_mode), b.get(ax.trap_traj.config.vel_limit)
     rows, results, abort = [], [], None
     t0 = time.monotonic()
+
+    def phase(count):
+        """Electrical angle [deg] of an encoder count: 2*pi*pp/cpr * (count - offsets) * direction (encoder.cpp)."""
+        return ((count - b.get(ec.phase_offset) - b.get(ec.phase_offset_float)) * b.get(ax.motor.config.pole_pairs)
+                * 360 / b.get(ec.cpr) * b.get(ec.direction)) % 360
+
+    def spike_event(k):
+        db: float = b.call(ax.motor.get_spike_db(index=k))
+        dc: float = b.call(ax.motor.get_spike_dc(index=k))
+        return {"n": b.call(ax.motor.get_spike_n(index=k)), "dB": round(db, 3), "dC": round(dc, 3)}
+
     try:
-        ax.requested_state = IDLE
+        b.set(ax.requested_state, IDLE)
         time.sleep(0.3)
-        dev.clear_errors()
-        ax.controller.config.control_mode = 3
-        ax.controller.config.input_mode = 5          # trap traj for the steps between positions
-        ax.trap_traj.config.vel_limit = 1.0
-        ax.requested_state = CLOSED_LOOP
+        b.call(odrv.clear_errors())
+        b.set(ax.controller.config.control_mode, ControlMode.POSITION_CONTROL)
+        b.set(ax.controller.config.input_mode, InputMode.TRAP_TRAJ)   # trap traj for the steps between positions
+        b.set(ax.trap_traj.config.vel_limit, 1.0)
+        b.set(ax.requested_state, CLOSED_LOOP)
         time.sleep(0.5)
-        if ax.current_state != CLOSED_LOOP:
-            raise RuntimeError(f"no closed loop: state {ax.current_state}, axis error {ax.error:#x}")
-        start = ax.encoder.pos_estimate
+        if b.get(ax.current_state) is not CLOSED_LOOP:
+            raise RuntimeError(f"no closed loop: state {b.get(ax.current_state).name}, axis error {int(b.get(ax.error)):#x}")
+        start = b.get(ax.encoder.pos_estimate)
         if args.elec is not None:
-            # phase = 2*pi*pp/cpr * (count - phase_offset - phase_offset_float) * direction (encoder.cpp)
-            e = ax.encoder.config
-            cpr, pp = e.cpr, ax.motor.config.pole_pairs
-            base = e.phase_offset + e.phase_offset_float + e.direction * args.elec / 360 * cpr / pp
+            cpr, pp = b.get(ec.cpr), b.get(ax.motor.config.pole_pairs)
+            base = (b.get(ec.phase_offset) + b.get(ec.phase_offset_float)
+                    + b.get(ec.direction) * args.elec / 360 * cpr / pp)
             period = cpr / pp
             target = base + round((start * cpr - base) / period) * period
             start = target / cpr
         for off in (float(x) for x in args.positions.split(",")):
-            ax.controller.input_pos = start + off
+            b.set(ax.controller.input_pos, start + off)
             t_move = time.monotonic()
-            while not ax.controller.trajectory_done and time.monotonic() - t_move < 10:
+            while not b.get(ax.controller.trajectory_done) and time.monotonic() - t_move < 10:
                 time.sleep(0.02)
             time.sleep(0.5)
-            pos = ax.encoder.pos_estimate
+            pos = b.get(ax.encoder.pos_estimate)
             ts, ids, iqs = [], [], []
-            dev.set_adc1_scan(args.adc1 == "on")
-            c0 = ax.motor.spike_count
+            b.call(odrv.set_adc1_scan(enable=args.adc1 == "on"))
+            c0 = b.get(ax.motor.spike_count)
             end = time.monotonic() + args.duration
             while args.quiet and time.monotonic() < end:
                 time.sleep(0.05)
             while not args.quiet and time.monotonic() < end:
                 t = time.monotonic() - t0
-                i_d = cc.Id_measured
-                i_q = cc.Iq_measured
-                ts.append(t); ids.append(i_d); iqs.append(i_q)
+                i_d = b.get(cc.Id_measured)
+                i_q = b.get(cc.Iq_measured)
+                ts.append(t)
+                ids.append(i_d)
+                iqs.append(i_q)
                 rows.append((round(t, 5), off, i_d, i_q))
-            c1 = ax.motor.spike_count
-            dev.set_adc1_scan(True)
-            events = [{"n": ax.motor.get_spike_n(k), "dB": round(ax.motor.get_spike_db(k), 3),
-                       "dC": round(ax.motor.get_spike_dc(k), 3)} for k in range(max(c0, c1 - 32), c1)]
-            if ax.current_state != CLOSED_LOOP or ax.error:
-                raise RuntimeError(f"left closed loop at offset {off}: axis error {ax.error:#x}")
+            c1 = b.get(ax.motor.spike_count)
+            b.call(odrv.set_adc1_scan(enable=True))
+            events = [spike_event(k) for k in range(max(c0, c1 - 32), c1)]
+            if b.get(ax.current_state) is not CLOSED_LOOP or b.get(ax.error):
+                raise RuntimeError(f"left closed loop at offset {off}: axis error {int(b.get(ax.error)):#x}")
             sd, sq = find_spikes(ts, ids, args.threshold), find_spikes(ts, iqs, args.threshold)
             rate_hz = len(ts) / args.duration if ts else 0.0
-            e = ax.encoder.config
-            elec = ((pos * e.cpr - e.phase_offset - e.phase_offset_float) * ax.motor.config.pole_pairs * 360 / e.cpr
-                    * e.direction) % 360
+            elec = phase(pos * b.get(ec.cpr))
             res = {"offset_turn": off, "mech_deg": round((pos % 1.0) * 360, 1), "elec_deg": round(elec, 1), "reads": len(ts),
                    "read_rate_hz": round(rate_hz, 1), "spikes_Id": len(sd), "spikes_Iq": len(sq),
                    "spikes_per_min": round((len(sd) + len(sq)) / args.duration * 60, 2),
@@ -131,10 +142,10 @@ def main():
         print(f"ABORT: {abort}")
     finally:
         try:
-            ax.requested_state = IDLE
-            dev.set_adc1_scan(True)
-            ax.controller.config.input_mode = saved["input_mode"]
-            ax.trap_traj.config.vel_limit = saved["trap_vel"]
+            b.set(ax.requested_state, IDLE)
+            b.call(odrv.set_adc1_scan(enable=True))
+            b.set(ax.controller.config.input_mode, saved_input_mode)
+            b.set(ax.trap_traj.config.vel_limit, saved_trap_vel)
         except Exception as ex:  # USB gone: the only stop left is the PSU
             print(f"!!! Could not command IDLE ({ex!r}). Press OUT on the PSU.")
     LOGS.mkdir(exist_ok=True)

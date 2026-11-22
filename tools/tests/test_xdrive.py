@@ -278,6 +278,9 @@ def test_paths_give_plain_values_and_take_json_values(json_bytes: bytes) -> None
         paths.set(board, "vbus_voltage", 1.0)
     with pytest.raises(KeyError, match="no property"):
         paths.get(board, "axis0.fet_thermistor.temperature")                         # a v0.5.1 name
+    link.put("config.gpio12_mode", 12)                                               # the removed ENC1 mode
+    assert paths.get(board, "config.gpio12_mode") == 12                              # read as its number
+    assert paths.set(board, "config.gpio12_mode", 2) == 2                            # and replaced
 
 
 @pytest.mark.parametrize("chunk", [61, 4], ids=["usb", "can"])

@@ -41,6 +41,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 
 ### Fixed
 - The SPI arbiter unlinks a finished or failed task before its callback, which could otherwise freeze the board.
+- `xdrive.paths.get` returns an enum value that this build lacks as its number, so `set_config.py` can replace a setting saved by another build (for example a GPIO mode whose number this firmware no longer defines).
 
 
 ## [0.5.6] - Unreleased

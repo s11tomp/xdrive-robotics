@@ -5,8 +5,9 @@ columns, settings files, saved configs) and log raw numbers.
     paths.get(board, "axis0.current_state")        # 8, not AxisState.CLOSED_LOOP_CONTROL
     paths.set(board, "axis0.controller.config.control_mode", 3)
 
-`get` returns an enum's or a flag's integer value; `set` converts a number or bool to the
-property's type (an int to its enum), so a settings file can hold plain JSON values.
+`get` returns an enum's or a flag's integer value, including a value this build's enum lacks
+(a setting saved by another build); `set` converts a number or bool to the property's type
+(an int to its enum), so a settings file can hold plain JSON values.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import enum
 from typing import Any
 
 from xdrive.board import Board
+from xdrive.errors import InterfaceMismatch
 from xdrive.model import Func, Prop, RwProp
 from xdrive.props import odrv
 
@@ -64,7 +66,13 @@ def typed(p: Prop[Any], value: Any) -> Any:
 
 
 def get(board: Board, path: str) -> Any:
-    return plain(board.get(prop(path)))
+    p = prop(path)
+    try:
+        return plain(board.get(p))
+    except InterfaceMismatch:
+        if not issubclass(p.kind, enum.Enum):
+            raise
+        return board.get(type(p)(p.path, int))  # an enum value this build lacks: its number
 
 
 def set(board: Board, path: str, value: Any) -> Any:  # noqa: A001

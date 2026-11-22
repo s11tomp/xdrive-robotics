@@ -46,6 +46,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 | [Encoders](docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
 | [Hardware](docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |
 | [Capture](docs/capture.md) | Recording properties at 8 kHz |
+| [Python library](docs/python-library.md) | `xdrive`: typed access to a board from Python, its errors, and the USB protocol |
 | [Testing](docs/testing.md) | Host tests, the bench suite, validating a board or motor |
 | [Troubleshooting](docs/troubleshooting.md) | Common errors on the Mini, connection problems, symptoms |
 | [Property reference](docs/reference.md) | Every property, function, enum and error bit (generated) |
@@ -121,7 +122,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `spike_hunt.py`, `brake_check.py`, `profile_loop.py` | Motor moves. Diagnostics: current-measurement glitches, hard braking, control-loop timing |
 | `analyze_*.py` | Offline analysis of the logs |
 | `impedance_frame.py` | Host codec for the CAN impedance command (no I/O) |
-| `xdrive/` | The host library: typed access to a board over USB (`from xdrive import usb`; see its docstrings). The tools above still use the `odrive` package and move to it one at a time |
+| `xdrive/` | The host library: typed access to a board over USB ([Python library](docs/python-library.md)). The tools above still use the `odrive` package and move to it one at a time |
 
 `make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers), mypy on the host library, and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
 

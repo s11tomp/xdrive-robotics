@@ -7,5 +7,5 @@
         print(board.get(odrv.vbus_voltage))
 
 `xdrive.props` names every property and function (generated from src/odrive-interface.yaml),
-`xdrive.enums` the enums and error flags, `xdrive.board.Board` the operations.
+`xdrive.enums` the enums and error flags, `xdrive.board.Board` the operations. Guide: docs/python-library.md.
 """

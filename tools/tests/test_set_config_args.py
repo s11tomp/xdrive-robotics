@@ -23,3 +23,10 @@ def test_save_alone_is_accepted():
 def test_assignments_and_file_are_accepted():
     assert parse_args(["a.b=1"]).assignments == ["a.b=1"]
     assert parse_args(["--file", "x.json"]).file == "x.json"
+
+
+def test_malformed_assignment_is_rejected(capsys):
+    with pytest.raises(SystemExit) as exc:
+        parse_args(["axis0.config.watchdog_timeout"])
+    assert exc.value.code == 2
+    assert "expected path=value" in capsys.readouterr().err

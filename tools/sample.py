@@ -47,41 +47,6 @@ FIELDS = [
 ]
 
 
-# Properties renamed in ODrive v0.5.6, which this firmware is based on. The scripts
-# keep the v0.5.1 names, so CSV columns and JSON keys stay comparable across firmware versions;
-# resolve() and the dump fall back to the new name when the old one doesn't exist.
-ALIASES = {
-    "axis0.fet_thermistor.temperature": "axis0.motor.fet_thermistor.temperature",
-    "axis0.motor.current_control.Ibus": "axis0.motor.I_bus",
-    "axis0.motor.gate_driver.drv_fault": "axis0.last_drv_fault",
-    "axis0.motor.config.direction": "axis0.encoder.config.direction",
-    "axis0.encoder.config.offset": "axis0.encoder.config.phase_offset",
-    "axis0.encoder.config.offset_float": "axis0.encoder.config.phase_offset_float",
-    "axis0.config.can_node_id": "axis0.config.can.node_id",
-    "axis0.controller.config.enable_current_mode_vel_limit": "axis0.controller.config.enable_torque_mode_vel_limit",
-}
-
-
-def _resolve(dev, path):
-    obj = dev
-    *parents, leaf = path.split(".")
-    for p in parents:
-        obj = obj._remote_attributes[p]
-    return obj._remote_attributes[leaf]
-
-
-def resolve(dev, path):
-    """Return the RemoteProperty object for a dotted path (so reads skip attribute lookup).
-
-    Falls back to the v0.5.6 name (ALIASES) when a v0.5.1 path doesn't exist on the board."""
-    try:
-        return _resolve(dev, path)
-    except KeyError:
-        if path in ALIASES:
-            return _resolve(dev, ALIASES[path])
-        raise
-
-
 def stats(xs):
     xs = [x for x in xs if isinstance(x, (int, float)) and math.isfinite(x)]
     if not xs:

@@ -1,62 +1,36 @@
 #!/usr/bin/env python3
-"""Read-only snapshot of an MKS XDRIVE Mini (ODrive fw v0.5.1) board.
+"""Read-only snapshot of an MKS XDRIVE Mini board running this firmware.
 
-Reads every readable property in the object tree (config + live state, both
-axes), decodes error bitmasks and enum fields, and writes to logs/:
+Reads every property in the board's interface (config + live state), decodes error flags and enum
+fields, and writes to logs/:
 
   <stamp>_<serial>[_<label>]_dump.json           every value + decoded errors
-  <stamp>_<serial>[_<label>]_config-backup.json  config only, same format as
-      `odrivetool backup-config`, restorable with `odrivetool restore-config`
+  <stamp>_<serial>[_<label>]_config-backup.json  writable config only, nested by path, restorable
+      with set_config.py --file (the format of odrivetool backup-config)
 
-It only ever calls RemoteProperty.get_value(): no property writes, no remote
-function calls (no clear_errors, save_configuration, requested_state, ...).
-It cannot move the motor or change the board.
+It only reads properties: no writes, no function calls (no clear_errors, save_configuration,
+requested_state, ...). It cannot move the motor or change the board.
 
-Usage:  python tools/dump_board.py [--label no-motor-boot] [--timeout 20]
+Usage:  python tools/dump_board.py [--label no-motor-boot] [--compare configs/<board>.json]
 """
 import argparse
 import datetime
+import enum
 import json
 import math
 import pathlib
-import re
 import sys
 import time
+from typing import Any
 
-import fibre.remote_object as ro
-import odrive
-import odrive.enums as enums
-
-from sample import ALIASES
+from xdrive import paths, report, usb
+from xdrive.errors import InterfaceMismatch, LinkError, XdriveError
+from xdrive.model import Prop, RwProp
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
 
-# Bitmask error fields: regex on the full path -> enum name prefix.
-BITMASK_FIELDS = [
-    (r"^axis\d\.error$", "AXIS_ERROR_"),
-    (r"\.motor\.error$", "MOTOR_ERROR_"),
-    (r"\.encoder\.error$", "ENCODER_ERROR_"),
-    (r"\.controller\.error$", "CONTROLLER_ERROR_"),
-    (r"\.sensorless_estimator\.error$", "SENSORLESS_ESTIMATOR_ERROR_"),
-    (r"_thermistor\.error$", "THERMISTOR_CURRENT_LIMITER_ERROR_"),
-    (r"^can\.error$", "CAN_ERROR_"),
-    (r"\.gate_driver\.drv_fault$", "DRV_FAULT_"),
-    (r"\.last_drv_fault$", "DRV_FAULT_"),          # v0.5.6
-]
-
-# Single-value enum fields.
-ENUM_FIELDS = [
-    (r"\.(current|requested)_state$", "AXIS_STATE_"),
-    (r"\.controller\.config\.control_mode$", "CONTROL_MODE_"),
-    (r"\.controller\.config\.input_mode$", "INPUT_MODE_"),
-    (r"\.motor\.config\.motor_type$", "MOTOR_TYPE_"),
-    (r"\.encoder\.config\.mode$", "ENCODER_MODE_"),
-    (r"\.motor\.armed_state$", "ARMED_STATE_"),
-    (r"\.lockin_state$", "LOCKIN_STATE_"),
-]
-
-# Extra fields worth eyeballing in the console summary.
+# Fields worth eyeballing in the console summary.
 SUMMARY = [
     "fw_version_major", "fw_version_minor", "fw_version_revision", "fw_version_unreleased",
     "hw_version_major", "hw_version_minor", "hw_version_variant",
@@ -65,61 +39,16 @@ SUMMARY = [
     "axis0.current_state", "axis0.motor.is_calibrated", "axis0.encoder.is_ready",
     "axis0.motor.config.phase_resistance", "axis0.motor.config.phase_inductance",
     "axis0.motor.config.torque_constant", "axis0.motor.config.current_lim_margin",
-    "axis0.motor.config.direction", "axis0.motor.effective_current_lim",
-    "axis0.encoder.config.offset", "axis0.encoder.config.offset_float",
+    "axis0.encoder.config.direction", "axis0.motor.effective_current_lim",
+    "axis0.encoder.config.phase_offset", "axis0.encoder.config.phase_offset_float",
     "axis0.encoder.config.pre_calibrated", "axis0.encoder.config.calib_scan_distance",
     "axis0.encoder.calib_scan_response", "axis0.encoder.pos_abs", "axis0.encoder.pos_estimate",
     "axis0.controller.config.enable_overspeed_error", "axis0.controller.config.vel_limit_tolerance",
     "axis0.controller.config.anticogging.anticogging_enabled",
     "axis0.controller.config.anticogging.pre_calibrated",
-    "axis0.config.can_node_id", "can.config.baud_rate",
-    "axis0.fet_thermistor.temperature",
+    "axis0.config.can.node_id", "can.config.baud_rate",
+    "axis0.motor.fet_thermistor.temperature",
 ]
-
-
-# Error/enum names: the v0.5.1 python package's table, or enums_v056.py (generated from the
-# firmware's odrive-interface.yaml with ODrive's tools/enums_template.j2) for v0.5.2+ firmware, which
-# reuses some error bits under new names. connect() picks the table from the board's version.
-ENUMS = enums
-
-
-def select_enums(dev):
-    global ENUMS
-    if (dev.fw_version_major, dev.fw_version_minor, dev.fw_version_revision) >= (0, 5, 2):
-        import enums_v056
-        ENUMS = enums_v056
-    else:
-        ENUMS = enums
-    return ENUMS
-
-
-def connect(**kwargs):
-    """odrive.find_any(**kwargs), then select the matching enum table for decoding."""
-    dev = odrive.find_any(**kwargs)
-    if dev is not None:
-        select_enums(dev)
-    return dev
-
-
-def enum_names(prefix):
-    return {k: v for k, v in vars(ENUMS).items() if k.startswith(prefix) and isinstance(v, int)}
-
-
-def decode_bitmask(value, prefix):
-    v = value & 0xFFFFFFFF  # int32 fields can come back negative if bit 31 is set
-    flags = [k for k, bit in enum_names(prefix).items() if bit and v & bit == bit]
-    known = 0
-    for k in flags:
-        known |= enum_names(prefix)[k]
-    out = {"hex": f"0x{v:08X}", "flags": flags}
-    if v & ~known:
-        out["unknown_bits"] = f"0x{v & ~known:08X}"
-    return out
-
-
-def decode_enum(value, prefix):
-    names = [k for k, v in enum_names(prefix).items() if v == value]
-    return names[0] if names else f"<unknown {value}>"
 
 
 def jsonable(v):
@@ -130,28 +59,38 @@ def jsonable(v):
     return v
 
 
-def walk(obj, prefix, values, access, functions, failures):
-    for name, attr in obj._remote_attributes.items():
-        path = f"{prefix}.{name}" if prefix else name
-        if isinstance(attr, ro.RemoteObject):
-            walk(attr, path, values, access, functions, failures)
-        elif isinstance(attr, ro.RemoteFunction):
-            functions.append(path)  # listed, never called
-        elif isinstance(attr, ro.RemoteProperty) and attr._can_read:
-            try:
-                values[path] = jsonable(attr.get_value())
-                access[path] = "rw" if attr._can_write else "r"
-            except Exception as ex:  # keep going; record what failed
-                failures[path] = repr(ex)
+def read_all(board):
+    """(values, access, functions, failures, errors, enums) for every property in the board's interface."""
+    values, access, failures, errors, enums = {}, {}, {}, {}, {}
+    for path, ep in board.interface.properties.items():
+        try:
+            v = board.get(paths.prop(path))
+        except InterfaceMismatch:  # an enum value the enum lacks (a setting saved by another build): keep the int
+            raw = board.get((RwProp if ep.writable else Prop)(path, int))
+            values[path], access[path] = raw, "rw" if ep.writable else "r"
+            enums[path] = f"<unknown {raw}>"
+            continue
+        except XdriveError as ex:  # keep going; record what failed
+            failures[path] = repr(ex)
+            continue
+        values[path] = jsonable(paths.plain(v))
+        access[path] = "rw" if ep.writable else "r"
+        if isinstance(v, enum.IntFlag) and path.endswith("error"):
+            errors[path] = report.jsonable(v)
+        elif isinstance(v, enum.IntFlag):
+            enums[path] = " | ".join(report.flag_names(v))
+        elif isinstance(v, enum.Enum):
+            enums[path] = v.name
+    return values, access, sorted(board.interface.functions), failures, errors, enums
 
 
 def config_only(values, access):
-    """Nested dict of writable `.config.` values, in the shape odrivetool restore-config reads.
+    """Nested dict of writable `.config.` values, in the shape set_config.py --file reads.
 
     Read-only config fields (e.g. can.config.baud_rate) and endpoint refs are
-    left out: restore-config would try to write them back.
+    left out: a restore would try to write them back.
     """
-    out = {}
+    out: dict[str, Any] = {}
     for path, v in values.items():
         parts = path.split(".")
         if "config" not in parts[:-1] or access.get(path) != "rw" or isinstance(v, list):
@@ -166,38 +105,27 @@ def config_only(values, access):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--label", default="", help="suffix for the output filenames, e.g. no-motor-boot")
-    ap.add_argument("--timeout", type=float, default=20.0, help="seconds to wait for the board on USB")
     ap.add_argument("--compare", help='settings file to diff the board against ({"settings": {path: value}}, '
                                       'the format set_config.py --file takes); nothing is written')
     args = ap.parse_args()
 
-    print(f"Searching for an ODrive on USB (timeout {args.timeout:.0f} s)...")
-    dev = connect(timeout=args.timeout)
-    if dev is None:
-        print("No board found. Is the PSU output on and the USB cable in?")
+    try:
+        board = usb.connect()
+    except LinkError as ex:
+        print(f"{ex}. Is the PSU output on and the USB cable in?")
         return 1
 
     t_host = datetime.datetime.now().astimezone()
     t0 = time.monotonic()
-    values, access, functions, failures = {}, {}, [], {}
-    walk(dev, "", values, access, functions, failures)
+    with board:
+        values, access, functions, failures, errors, enums_decoded = read_all(board)
+        version_id = board.interface.version_id
     read_s = time.monotonic() - t0
 
     serial = format(values.get("serial_number", 0), "X")
-    errors = {}
-    enums_decoded = {}
-    for path, v in values.items():
-        if not isinstance(v, int):
-            continue
-        for pat, prefix in BITMASK_FIELDS:
-            if re.search(pat, path):
-                errors[path] = decode_bitmask(v, prefix)
-        for pat, prefix in ENUM_FIELDS:
-            if re.search(pat, path):
-                enums_decoded[path] = decode_enum(v, prefix)
 
-    def get(k):  # v0.5.1 name, else its v0.5.6 name (sample.ALIASES)
-        return values[k] if k in values else values.get(ALIASES.get(k), "<missing>")
+    def get(k):
+        return values.get(k, "<missing>")
 
     def same(actual, exp):
         if isinstance(actual, (int, float)) and isinstance(exp, (int, float)):
@@ -218,7 +146,7 @@ def main():
             "host_time": t_host.isoformat(),
             "read_duration_s": round(read_s, 3),
             "serial": serial,
-            "odrive_python": odrive.__version__,
+            "interface_version_id": f"{version_id:08x}",
             "script": "dump_board.py (read-only)",
             "label": args.label,
             "n_values": len(values),
@@ -238,10 +166,9 @@ def main():
     # Console summary
     print(f"\nBoard {serial}: read {len(values)} values in {read_s:.2f} s")
     for k in SUMMARY:
-        kk = k if k in values else ALIASES.get(k)
-        if kk in values:
-            extra = f"  ({enums_decoded[kk]})" if kk in enums_decoded else ""
-            print(f"  {kk} = {values[kk]}{extra}")
+        if k in values:
+            extra = f"  ({enums_decoded[k]})" if k in enums_decoded else ""
+            print(f"  {k} = {values[k]}{extra}")
     print("\nErrors (only from this boot; errors are RAM-only and cleared by a power cycle):")
     for path, d in errors.items():
         if d["flags"] or d.get("unknown_bits"):

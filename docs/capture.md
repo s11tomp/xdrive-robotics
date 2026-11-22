@@ -1,6 +1,6 @@
 # Capture
 
-The board can record up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer and send the buffer to the host in about 0.2 s. USB polling reaches about 150 to 200 samples per second for a set of properties, so capture is the way to see what happens within a few control periods: a current step, a hard stop, a fault.
+The board can record up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer and send the buffer to the host in about 0.13 s. USB polling reaches about 275 to 340 samples per second for a set of properties, so capture is the way to see what happens within a few control periods: a current step, a hard stop, a fault.
 
 ## From the command line
 

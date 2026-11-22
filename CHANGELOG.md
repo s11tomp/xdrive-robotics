@@ -26,6 +26,9 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - The CAN thread's stack is 4 KB, the USB thread's size (ODrive: 1 KB): endpoint access runs the same handlers as USB.
 - The brake resistor's PWM (TIM2) runs at 16 kHz, restarted by every TIM1 update event, so its edges stay at least 1.1 us from each current sample. Running free at 10.25 kHz, its edges crossed the samples several times a second and corrupted those readings by up to 2.2 A for one control period.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
+- The host tools use the `xdrive` library; `requirements.txt` no longer holds the `odrive` package or its `ipython` pin. Error flags print at full width, motor error bits 32-35 included.
+- `sample.py` reads about 340 samples per second (150 before), `move_test.py` about 275 (200), and the capture readout takes 0.13 s (0.23). Two CSV columns take their v0.5.6 names: `axis0.motor.fet_thermistor.temperature` and `axis0.motor.I_bus`.
+- The tools talk only to this firmware: a board on Makerbase's v0.5.1 firmware is flashed by putting it in DFU mode first, or with `swd_flash.py --no-usb`.
 - Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
 - The second motor's gate drive and gate driver chip select pins are in analog mode; the Mini leaves them unconnected.
 
@@ -34,7 +37,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - `INPUT_MODE_MIRROR` (7) with `controller.config.axis_to_mirror`, `mirror_ratio` and `torque_mirror_ratio`, and `controller.config.load_encoder_axis`: both took values from the other axis. The controller always uses its own axis's encoder (or the sensorless estimator).
 - `CONTROLLER_ERROR_INVALID_MIRROR_AXIS` (0x8), `CONTROLLER_ERROR_INVALID_LOAD_ENCODER` (0x10) and `GPIO_MODE_ENC1` (12). Every other error bit, input mode and GPIO mode keeps its ODrive v0.5.6 number.
 - `get_drv_fault()` returns the one gate driver's fault word (uint32).
-- ODrive's GUI, Arduino library, in-tree Python package (`odrivetool`), Docker and tup builds. The host tools use the `odrive` 0.5.1.post0 package from PyPI instead.
+- ODrive's GUI, Arduino library, in-tree Python package (`odrivetool`), Docker and tup builds.
 
 ### Fixed
 - The SPI arbiter unlinks a finished or failed task before its callback, which could otherwise freeze the board.

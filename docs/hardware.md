@@ -8,7 +8,7 @@ The MKS XDRIVE Mini is a single-motor clone of the ODrive v3.6: an STM32F405, on
 |---|---|---|
 | Power and motor terminal | 5 positions, pluggable screw terminal | DC+ and DC− from the supply, and the three motor phases (checked on a board) |
 | Brake resistor terminal | 2 | The brake resistor, driven by a half-bridge (two FETs and an LM5109B driver) |
-| USB | | odrivetool and the host tools; the board is visible only while the DC bus is powered (checked on a board) |
+| USB | | the host tools; the board is visible only while the DC bus is powered (checked on a board) |
 | J1 | 2, jumper | Fits the onboard 120 Ω CAN terminator (R18): only on the board at the end of the bus |
 | J2 | 5, JST-GH 1.25 mm | SWD (checked on a board) |
 | J3 | 2, JST-GH 1.25 mm | CAN |

@@ -30,7 +30,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 - **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `src/communication/can/impedance_frame.hpp`; host codec: `tools/xdrive/impedance_frame.py`.
 - **Endpoint access over CAN** (CANSimple ID 0x1F): read or write any property, call any function, and read the interface JSON and the capture buffer, by the endpoint IDs USB uses. A board can be configured, tuned, saved and rebooted with no USB connection. Layout: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/xdrive/endpoint_frame.py`.
 - **Regen limits**, off by default: flux braking above a bus voltage (`motor.config.flux_brake_start_voltage`), and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`) that burn regen in the windings before cutting braking torque.
-- **High-rate capture** (`odrv.capture`): up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer, with a level, manual or immediate trigger, read back in about 0.2 s.
+- **High-rate capture** (`odrv.capture`): up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer, with a level, manual or immediate trigger, read back in about 0.13 s.
 
 `git diff -M upstream/fw-v0.5.6 main -- Firmware src` shows every firmware change (upstream's `Firmware/` is `src/` here). Developer notes (repository layout, toolchain, build, tests, debugging, the byte-identical rebuild of Makerbase's firmware) are in `docs/development.md`. Facts about the board (pinouts, CAN wiring, bootloader, quirks) are in `docs/board-findings.md`.
 
@@ -100,7 +100,7 @@ All commands run from the repository root. The tools write logs to `logs/` and f
 
 ## Host tools (`tools/`)
 
-Each tool's docstring gives its usage. "Motor moves" means the tool drives the motor or reboots the board.
+Each tool's docstring gives its usage. "Motor moves" means the tool drives the motor or reboots the board. The tools talk only to this firmware: to flash a board that runs Makerbase's v0.5.1, put it in DFU mode first, or use `swd_flash.py --no-usb`.
 
 | Tool | What it does |
 |---|---|
@@ -113,7 +113,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `swd_backup.py` | Read-only whole-flash backup over SWD |
 | `correction_table.py` | Reads, saves, restores or smooths the encoder correction table |
 | `capture.py` | Records up to 8 properties at 8 kHz with the firmware's capture |
-| `sample.py` | Read-only ~150 Hz sampler over USB |
+| `sample.py` | Read-only ~340 Hz sampler over USB |
 | `move_test.py`, `hold_ab.py`, `disturb_test.py` | Motor moves. Trapezoidal moves, hold-noise comparisons and disturbance rejection, logged |
 | `safety_test.py`, `impedance_test.py`, `regen_test.py`, `capture_test.py` | Bench tests of the added features with PASS/FAIL checks (all but `capture_test.py` move the motor) |
 | `regress.py` | Motor moves. Regression suite compared with a saved baseline, at a fixed rotor angle (`--hold-at`) |
@@ -121,7 +121,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `demo.py` | Motor moves. A demo for an audience: moves and a sine sweep in a loop (`--loop N`, or until Ctrl-C), or with `--spring [S]` only a spring to twist by hand |
 | `spike_hunt.py`, `brake_check.py`, `profile_loop.py` | Motor moves. Diagnostics: current-measurement glitches, hard braking, control-loop timing |
 | `analyze_*.py` | Offline analysis of the logs |
-| `xdrive/` | The host library: typed access to a board over USB or CAN, impedance commands to several joints over CAN, and the CAN frame codecs ([Python library](docs/python-library.md)). The tools above still use the `odrive` package and move to it one at a time |
+| `xdrive/` | The host library every tool above uses: typed access to a board over USB or CAN, impedance commands to several joints over CAN, and the CAN frame codecs ([Python library](docs/python-library.md)) |
 
 `make test` runs the firmware's unit tests on the host (trajectory planner, CAN signal packing, timers), mypy on the host library, and the host tools' tests, which check the host codec, the CAN database and the bus current limits against the firmware headers (needs `clang++`).
 

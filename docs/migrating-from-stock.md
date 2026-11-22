@@ -4,9 +4,9 @@ A Mini ships with Makerbase's build of ODrive v0.5.1. This firmware is based on 
 
 ## Before flashing
 
-- **Back up the board's config:** `python tools/dump_board.py --label stock` writes every property to `logs/<stamp>_<serial>_stock_dump.json` and a config backup next to it. The tools read v0.5.1 boards.
-- **Keep the flash backup:** `usb_flash.py` saves the whole flash to `backups/` before writing. That image is the only way back to Makerbase's firmware: `python tools/usb_flash.py --bin backups/<dir>/flash.bin --write`. Makerbase's published images are other v0.5.1 builds, not necessarily the one on a given board.
-- **Entering the bootloader:** `usb_flash.py` asks the running firmware to enter the STM32's DFU bootloader (`enter_dfu_mode()`). This is tested from this firmware, not yet from Makerbase's. If it fails, hold S2 while pressing S1 (reset): the board starts in the bootloader, and `usb_flash.py` picks it up there.
+- **Back up the board's config:** the tools talk only to this firmware. A stock board's config can be dumped with the tools at the tag `xdrive/v0.5.1`: `python tools/dump_board.py --label stock` writes every property to `logs/<stamp>_<serial>_stock_dump.json` and a config backup next to it. The flash backup below also holds the config sectors.
+- **Keep the flash backup:** in the bootloader, `usb_flash.py` reads the whole flash to `backups/` before writing. That image is the only way back to Makerbase's firmware: `python tools/usb_flash.py --bin backups/<dir>/flash.bin --write`. Makerbase's published images are other v0.5.1 builds, not necessarily the one on a given board.
+- **Entering the bootloader:** hold S2 while pressing S1 (reset): the board starts in the STM32's DFU bootloader, and `usb_flash.py` picks it up there. From this firmware, `usb_flash.py` also enters the bootloader itself (`enter_dfu_mode()`); `swd_flash.py --no-usb` flashes over SWD without a board on USB.
 
 ## What resets
 

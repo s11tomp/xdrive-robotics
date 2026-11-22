@@ -15,6 +15,7 @@ The host tools' tests check:
 - the host library (`xdrive`): its generated names against the interface JSON, `Board` against a fake endpoint table, the USB link against a fake device, and the CAN bus against fake boards on python-can's virtual bus;
 - the CAN database (`docs/cansimple.dbc`): the impedance command and a float message encode and decode as the host codec does;
 - the bus current soft limits (`bus_limit.hpp`) against their contract, on 3,000 random operating points plus a grid;
+- the host tools' sources: every tool compiles under the repo env's Python, and every property path a tool names as a string exists in the generated `xdrive.props`;
 - the release notes extraction from `CHANGELOG.md`.
 
 ## Bench tests

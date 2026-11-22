@@ -1,6 +1,6 @@
 # Python library (`xdrive`)
 
-`tools/xdrive` is the host library for this firmware: typed reads, writes and function calls on a board, by names generated from the firmware's interface file. It talks to the board over USB with its own client for the firmware's packet protocol, so it needs neither the `odrive` Python package nor `odrivetool`, and over [CAN](#can) with python-can: the same `Board` through [endpoint access](can.md#endpoint-access-0x1f), plus a `Bus` that commands several joints per control cycle. The CAN part is tested against fake boards on python-can's virtual bus, not yet on a real bus. The tools in `tools/` still use the `odrive` package and move to `xdrive` one at a time.
+`tools/xdrive` is the host library for this firmware: typed reads, writes and function calls on a board, by names generated from the firmware's interface file. It talks to the board over USB with its own client for the firmware's packet protocol, so it needs neither the `odrive` Python package nor `odrivetool`, and over [CAN](#can) with python-can: the same `Board` through [endpoint access](can.md#endpoint-access-0x1f), plus a `Bus` that commands several joints per control cycle. The CAN part is tested against fake boards on python-can's virtual bus, not yet on a real bus. Every tool in `tools/` uses this library.
 
 ```python
 from xdrive import usb
@@ -24,7 +24,7 @@ PYTHONPATH=tools .venv/bin/python -i -c "from xdrive import usb; from xdrive.pro
 
 The second command is the interactive shell: `board.get(odrv.axis0.encoder.pos_estimate)` at the prompt.
 
-One process at a time holds a board's USB interface. While a script, `odrivetool` or a tool from `tools/` is connected, `usb.connect()` fails with "can't claim the interface; is another tool connected?".
+One process at a time holds a board's USB interface. While a script or a tool from `tools/` is connected, `usb.connect()` fails with "can't claim the interface; is another tool connected?".
 
 ## Names
 

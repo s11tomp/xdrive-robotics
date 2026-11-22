@@ -7,7 +7,7 @@
    calls save_configuration(), so a power cycle restores the saved config.
 3. Enters closed loop, which holds the current position (the firmware sets
    input_pos = pos_estimate on entry), then runs out-and-back moves.
-4. Samples ~200 Hz the whole time. Any error, unexpected state, timeout or
+4. Samples ~275 Hz the whole time. Any error, unexpected state, timeout or
    Ctrl-C → requested_state = IDLE immediately.
 5. Always finishes in IDLE, then puts the changed settings back to their
    previous RAM values.

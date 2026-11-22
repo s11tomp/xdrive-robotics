@@ -4,6 +4,7 @@
 #include <odrive_main.h>
 #include <functional>
 
+#include "endpoint_frame.hpp"
 #include "impedance_frame.hpp"
 
 bool CANSimple::init() {
@@ -162,6 +163,9 @@ void CANSimple::do_command(Axis& axis, const can_Message_t& msg) {
             break;
         case MSG_IMPEDANCE:
             impedance_callback(axis, msg);
+            break;
+        case MSG_ENDPOINT:
+            endpoint_callback(axis, msg);
             break;
         default:
             break;
@@ -431,6 +435,65 @@ bool CANSimple::impedance_callback(Axis& axis, const can_Message_t& msg) {
     impedance_frame::encode_reply(txmsg.buf, ranges, ctrl.pos_estimate_linear_src_.any().value_or(0.0f),
                                   ctrl.vel_estimate_src_.any().value_or(0.0f), torque, flags,
                                   motor.fet_thermistor_.temperature_, vbus_voltage);
+    return canbus_->send_message(txmsg);
+}
+
+namespace {
+
+// endpoint_frame's Backend: the generated fibre endpoint table, as USB serves it.
+struct FibreEndpoints {
+    endpoint_frame::Kind kind(uint16_t id) {
+        if (id == 0 || id >= fibre::kRawEndpointBase) {
+            return endpoint_frame::KIND_BUFFER;
+        }
+        switch (fibre::endpoint_kind(id)) {
+            case fibre::EndpointKind::kReadOnly: return endpoint_frame::KIND_READ_ONLY;
+            case fibre::EndpointKind::kReadWrite: return endpoint_frame::KIND_READ_WRITE;
+            case fibre::EndpointKind::kFunction: return endpoint_frame::KIND_FUNCTION;
+            default: return endpoint_frame::KIND_NONE;
+        }
+    }
+
+    // An empty input makes a read-write property's exchange a plain read. Its end must not be null:
+    // fibre's decoder treats a null end as unbounded (see read_raw in capture.cpp).
+    size_t read(uint16_t id, uint8_t out[8]) {
+        fibre::cbufptr_t in{out, size_t(0)};
+        fibre::bufptr_t o{out, 8};
+        return fibre::endpoint_handler(id, &in, &o) ? 8 - o.size() : 0;
+    }
+
+    bool write(uint16_t id, const uint8_t* value, size_t n) {
+        uint8_t old[8];  // exchange returns the old value
+        fibre::cbufptr_t in{value, n};
+        fibre::bufptr_t out{old, sizeof(old)};
+        return fibre::endpoint_handler(id, &in, &out);
+    }
+
+    // A function's stub takes its inputs from, and stores its outputs in, the argument endpoints.
+    bool call(uint16_t id) {
+        uint8_t none[1];
+        fibre::cbufptr_t in{none, size_t(0)};
+        fibre::bufptr_t out{none, size_t(0)};
+        return fibre::endpoint_handler(id, &in, &out);
+    }
+
+    bool read_buffer(uint16_t id, uint32_t offset, uint8_t out[4]) {
+        const uint8_t off[4] = {uint8_t(offset), uint8_t(offset >> 8), uint8_t(offset >> 16), uint8_t(offset >> 24)};
+        fibre::cbufptr_t in{off, sizeof(off)};
+        fibre::bufptr_t o{out, 4};
+        return id == 0 ? fibre::endpoint_handler(0, &in, &o) : fibre::raw_endpoint_handler(id, &in, &o);
+    }
+};
+
+}  // namespace
+
+bool CANSimple::endpoint_callback(const Axis& axis, const can_Message_t& msg) {
+    FibreEndpoints endpoints;
+    can_Message_t txmsg;
+    txmsg.id = (axis.config_.can.node_id << NUM_CMD_ID_BITS) + MSG_ENDPOINT;
+    txmsg.isExt = axis.config_.can.is_extended;
+    txmsg.len = 8;
+    endpoint_frame::handle(msg.buf, msg.rtr ? 0 : msg.len, txmsg.buf, endpoints);
     return canbus_->send_message(txmsg);
 }
 

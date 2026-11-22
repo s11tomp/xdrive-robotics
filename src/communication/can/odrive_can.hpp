@@ -40,7 +40,7 @@ public:
     CANSimple can_simple_{this};
 
     osThreadId thread_id_;
-    const uint32_t stack_size_ = 1024;  // Bytes
+    const uint32_t stack_size_ = 4096;  // Bytes: endpoint access runs the same handlers as the USB thread (4096)
 
 private:
     static const uint8_t kCanFifoNone = 0xff;

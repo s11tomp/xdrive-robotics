@@ -1,8 +1,8 @@
 # CAN
 
-Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus this firmware's impedance command (0x1E), which sends a full setpoint and gets the joint's state back in one frame pair.
+Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus two messages of this firmware's: the impedance command (0x1E), which sends a full setpoint and gets the joint's state back in one frame pair, and endpoint access (0x1F), which reads and writes any setting and calls any function, so a board can be configured, tuned and saved without USB.
 
-> **Status:** the impedance frame's encoding is tested on the host against the firmware's header (`make test`), and impedance control is tested over USB. Neither has crossed a real bus yet.
+> **Status:** the impedance and endpoint frames are tested on the host against the firmware's headers (`make test`), and impedance control is tested over USB. Neither has crossed a real bus yet, so the Python examples below are untested.
 
 ## Wiring
 
@@ -64,6 +64,7 @@ Every frame addressed to a board feeds its watchdog.
 | 0x01C | Get ADC Voltage | host, then board | 0: GPIO number, uint8 (sent without RTR); reply 0: voltage, float32 |
 | 0x01D | Get Controller Error | board, RTR or cyclic | 0: controller error, uint32 |
 | 0x01E | Impedance (added) | host, then board | see below |
+| 0x01F | Endpoint access (added) | host, then board | see below |
 
 IDs 0x000 and 0x700 are reserved for CANopen (NMT and heartbeat), which CANSimple doesn't implement; 0x008 (Set Axis Startup Config) is not implemented. The error and state values are in the [property reference](reference.md).
 
@@ -135,6 +136,72 @@ with can.Bus(interface="socketcan", channel="can0", bitrate=1000000) as bus:
 
 The reply uses the command's ID, so a host commanding several joints collects one cycle's replies before it sends the next cycle.
 
+## Endpoint access (0x1F)
+
+The host reads or writes any property, or calls any function, by its endpoint ID: the `id` of the property in the board's interface JSON, the same table USB uses. It can also read the interface JSON itself and the [capture](capture.md) buffer. The board answers each request at once on the same ID. Source: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/endpoint_frame.py`.
+
+| Bytes | Request | Reply |
+|---|---|---|
+| 0 | opcode: 1 read, 2 write, 3 call, 4 read buffer | the request's opcode + 0x80 |
+| 1–2 | endpoint ID, uint16 | endpoint ID, echoed |
+| 3 | 0 | status (below) |
+| 4–7 | write: the new value; read buffer: byte offset, uint32; else 0 | read, write: the value after the request; read buffer: 4 bytes of the buffer; else 0 |
+
+Values are the property's little-endian bytes, zero-padded to 4: a `float` is 4 bytes, a `uint16` 2, a `bool` 1. A write's reply carries the value read back after the write, so it shows what a property's setter stored.
+
+| Status | Meaning |
+|---|---|
+| 0 | OK |
+| 1 | No endpoint with this ID |
+| 2 | Wrong kind: read or write of a function, call of a property, write of a read-only property, buffer read of a property |
+| 3 | The property is wider than 4 bytes (`serial_number`, `motor.error`): out of reach over this message. Read `motor.error` with Get Motor Error (0x003) |
+| 4 | A write's bytes past the property's size aren't zero (the host packed the wrong type); nothing was written |
+| 5 | The board refused the request (a failed write, call or buffer read) |
+| 6 | Unknown opcode |
+| 7 | The request isn't 8 bytes, or is a remote frame |
+
+**Functions.** A function's inputs and outputs are endpoints of their own, listed under the function in the JSON. Write the inputs, call the function, then read the outputs: `capture.add_channel` takes `capture.add_channel.endpoint_id` and leaves its result in `capture.add_channel.ok`. `save_configuration` and `reboot` reboot the board before it can reply; the heartbeat returns once it is up again.
+
+**Buffers.** Opcode 4 reads 4 bytes at a byte offset:
+- Endpoint 0 is the interface JSON (about 37 KB). Its bytes past the end read as zeros, and the JSON contains no zero byte. Offset 0xFFFFFFFF reads the JSON's version ID (uint32), which changes with every firmware build that changes the interface: a host caches the JSON per version ID and fetches it again only when the ID changes.
+- Endpoint 0x7F00 is the capture readout (`capture.readout_endpoint`). Read `capture.state` first: the readout is all zeros until the capture is DONE.
+
+**Each request is one frame pair**, so bulk reads are slow by USB standards. Estimated, not measured: at 1 Mbit/s and 0.13 ms per frame, the 37 KB JSON takes about 19,000 frames (about 2.5 s), and a full 32 KiB capture about 16,400 frames (about 2 s), more with the adapter's round-trip latency. Run bulk reads while the joints aren't being commanded.
+
+Changes made this way are in RAM until `save_configuration` is called. Requests run in the board's CAN thread with the same handlers as USB, so a write over CAN has the same effect as the same write over USB.
+
+**From Python** (`tools/` on PYTHONPATH):
+
+```python
+import json
+import can
+import endpoint_frame as ep
+
+node = 1
+arb_id = node << 5 | ep.MSG_ENDPOINT
+
+
+def transact(bus, frame):
+    bus.send(can.Message(arbitration_id=arb_id, is_extended_id=False, data=frame))
+    while (msg := bus.recv(timeout=0.1)) is not None:
+        if msg.arbitration_id == arb_id:
+            return ep.decode_reply(msg.data)
+    raise TimeoutError(f"node {node}: no endpoint reply")
+
+
+with can.Bus(interface="socketcan", channel="can0", bitrate=1000000) as bus:
+    chunks, offset = [], 0
+    while not chunks or 0 not in chunks[-1]:   # the JSON ends at the first zero byte
+        chunks.append(transact(bus, ep.read_buffer_request(ep.JSON_ENDPOINT, offset)).data)
+        offset += 4
+    names = ep.endpoints(json.loads(b"".join(chunks).split(b"\0")[0]))
+
+    gain = names["axis0.controller.config.vel_gain"]
+    reply = transact(bus, ep.write_request(gain.id, gain.type, 0.05))
+    assert reply.status == ep.Status.OK, reply.status
+    print("vel_gain is now", ep.unpack(gain.type, reply.data))
+```
+
 ## Bus load
 
 An 8-byte frame takes about 0.13 ms at 1 Mbit/s, including bit stuffing. For six joints, one impedance command and one reply each per cycle:
@@ -151,6 +218,7 @@ The default cyclic messages add 660 frames per second for six boards (heartbeat 
 `docs/cansimple.dbc` describes every message above for cantools, SavvyCAN and other DBC readers, once per node ID 0 to 7 (`Node3_Set_Input_Pos` is ID 3 << 5 | 0x00C). `make generate` writes it from `tools/gen_dbc.py`, and `make test` checks it against the host codec.
 
 - **The impedance command** (`NodeN_Impedance`) is in it with scales for the default `impedance_*` ranges. A DBC holds one layout per ID, so the reply on the same ID isn't: decode replies with `tools/impedance_frame.py`.
+- **Endpoint access** (`NodeN_Endpoint`) is in it as the request (opcode, endpoint ID, value). Its reply, on the same ID, isn't: decode it with `tools/endpoint_frame.py`.
 - **Get messages** are defined as the board's reply. The host's request is a remote frame (RTR) with the same ID; `Get_ADC_Voltage`'s request carries the GPIO number in byte 0.
 - `examples/can_dbc.py` (Motor moves) drives one board with python-can and the database: closed loop, a slow sine on `input_pos`, then IDLE.
 

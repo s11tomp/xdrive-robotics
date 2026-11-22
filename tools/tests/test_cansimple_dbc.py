@@ -40,3 +40,13 @@ def test_set_input_pos_layout():
     raw = struct.pack("<fhh", 1.25, 500, -250)  # pos float, vel_ff and torque_ff in thousandths
     assert DB.decode_message(f"Node{NODE}_Set_Input_Pos", raw) == pytest.approx(
         {"Input_Pos": 1.25, "Vel_FF": 0.5, "Torque_FF": -0.25})
+
+
+def test_endpoint_request_matches_codec():
+    import endpoint_frame as ep
+    msg = DB.get_message_by_name(f"Node{NODE}_Endpoint")
+    assert msg.frame_id == NODE << 5 | ep.MSG_ENDPOINT
+    raw = ep.write_request(0x1234, "uint32", 0xDEADBEEF)
+    assert msg.decode(raw, decode_choices=False) == {"Ep_Opcode": ep.Op.WRITE, "Ep_Endpoint_ID": 0x1234,
+                                                     "Ep_Value": 0xDEADBEEF}
+    assert msg.encode({"Ep_Opcode": int(ep.Op.WRITE), "Ep_Endpoint_ID": 0x1234, "Ep_Value": 0xDEADBEEF}) == raw

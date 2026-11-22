@@ -61,6 +61,23 @@ bool endpoint_handler(int idx, cbufptr_t* input_buffer, bufptr_t* output_buffer)
     }
 }
 
+// XDRIVE: the same classification endpoint_handler's property cases use: 'exchange' is a read-write
+// property, 'read' a read-only one, and everything else except endpoint 0 is a function.
+EndpointKind endpoint_kind(int idx) {
+    switch (idx) {
+[%- for endpoint in endpoints if endpoint.id != 0 %]
+[%- if endpoint.function.name == 'exchange' and endpoint.in_bindings | list == ['obj'] %]
+        case [[endpoint.id]]: return EndpointKind::kReadWrite;
+[%- elif endpoint.function.name == 'read' and endpoint.in_bindings | list == ['obj'] %]
+        case [[endpoint.id]]: return EndpointKind::kReadOnly;
+[%- else %]
+        case [[endpoint.id]]: return EndpointKind::kFunction;
+[%- endif %]
+[%- endfor %]
+        default: return EndpointKind::kNone;
+    }
+}
+
 bool is_endpoint_ref_valid(endpoint_ref_t endpoint_ref) {
     if (endpoint_ref.json_crc != json_crc_) {
         return false;

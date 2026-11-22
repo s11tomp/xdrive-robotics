@@ -32,6 +32,6 @@ The same file is a library: `capture(dev, fields, decimation=1, trigger=None, po
 1. `clear_channels()`, then `add_channel(endpoint_id)` for each property (float32, int32, uint32, uint16, uint8 or bool).
 2. Set `decimation`, `trigger_mode` (`IMMEDIATE`, `RISING`, `FALLING` or `MANUAL`), `trigger_channel`, `trigger_level` and `post_trigger`.
 3. `start()`. `state` goes `ARMED`, then `TRIGGERED` (recording the post-trigger samples), then `DONE`. `trigger()` triggers by hand in any mode.
-4. Read the buffer from `readout_endpoint` in one transfer: `n_samples` frames of 4 bytes per channel, in channel order, with the trigger sample at `trigger_index`.
+4. Read the buffer from `readout_endpoint` in one transfer: `n_samples` frames of 4 bytes per channel, in channel order, with the trigger sample at `trigger_index`. Over CAN, read it 4 bytes at a time with [endpoint access](can.md#endpoint-access-0x1f).
 
 `capacity` = 8192 / channels frames. Recording costs about 10 µs of the 125 µs control period with 8 channels.

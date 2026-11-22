@@ -53,7 +53,7 @@ Facts about the MKS XDRIVE Mini, Makerbase's stock firmware and this firmware's 
 - **Onboard terminator** (schematic): R18 (120 Ω) across CAN_H/CAN_L in series with jumper J1. Fit it only on the board at the far end of the bus. With the adapter's terminator also on, CAN_H to CAN_L measures about 60 Ω with the power off (40 Ω means three terminators, 120 Ω means one).
 - **Topology:** each board has one CAN connector, so boards tap off a twisted-pair trunk on short stubs (at most about 0.3 m at 1 Mbit/s) instead of daisy-chaining.
 - **Ground:** the USB-CAN adapter's ground must reach the boards' ground some other way, since J3 doesn't carry it: the supply negative, at one point.
-- **Protocol versions** (verified in source): v0.5.1's CANSimple implements commands 0x00–0x18. The v0.5.x line then added cyclic encoder messages (0.5.2), the trajectory-done flag (0.5.3), gains over CAN (0.5.4), and heartbeat error flags with configurable cyclic rates (0.5.6). This firmware adds the impedance command (0x1E).
+- **Protocol versions** (verified in source): v0.5.1's CANSimple implements commands 0x00–0x18. The v0.5.x line then added cyclic encoder messages (0.5.2), the trajectory-done flag (0.5.3), gains over CAN (0.5.4), and heartbeat error flags with configurable cyclic rates (0.5.6). This firmware adds the impedance command (0x1E) and endpoint access (0x1F).
 - **The ODriveArduino library's `ODriveCAN` speaks the 0.6.x protocol** (verified in source). Against v0.5.1, `setPosGain()` (0x1A) and `setVelGains()` (0x1B) are silently ignored, `setLimits()` applies only the velocity limit, `Get_Bus_Voltage_Current` returns voltage only, and the heartbeat lacks the 0.6 fields.
 
 ## Bootloader and flashing

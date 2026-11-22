@@ -14,6 +14,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - Soft position limits (`controller.config.pos_min`, `pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). Safety faults zero the torque.
 - Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4; `controller.input_kp`, `input_kd`).
 - CAN impedance command and reply (CANSimple ID 0x1E; full scales in `axis.config.can.impedance_*`).
+- CAN endpoint access (CANSimple ID 0x1F): read or write any property up to 4 bytes wide, call any function, and read the interface JSON and the capture buffer, by endpoint ID (`tools/endpoint_frame.py`).
 - Flux braking (`motor.config.flux_brake_start_voltage`, `flux_brake_gain`) and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`).
 - High-rate capture (`odrv.capture`), replacing the hard-wired oscilloscope buffer.
 - Build with plain make (`make`), and host tools for flashing over USB DFU or SWD, configuration and bench tests (`tools/`).
@@ -21,6 +22,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 
 ### Changed
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
+- The CAN thread's stack is 4 KB, the USB thread's size (ODrive: 1 KB): endpoint access runs the same handlers as USB.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
 - Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
 - The second motor's gate drive and gate driver chip select pins are in analog mode; the Mini leaves them unconnected.

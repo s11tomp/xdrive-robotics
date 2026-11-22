@@ -36,6 +36,11 @@ bool endpoint0_handler(cbufptr_t* input_buffer, bufptr_t* output_buffer);
 // raw_endpoint_handler serves them as offset-addressed byte buffers, like endpoint 0's JSON.
 constexpr uint16_t kRawEndpointBase = 0x7f00;
 bool raw_endpoint_handler(int idx, cbufptr_t* input_buffer, bufptr_t* output_buffer);
+// XDRIVE: what each ID in the generated table is. endpoint_handler runs a function's ID, so code
+// that serves IDs from outside the fibre protocol (CAN endpoint access) checks this first.
+// Endpoint 0 (the JSON) and IDs from kRawEndpointBase up are kNone.
+enum class EndpointKind : uint8_t { kNone, kReadOnly, kReadWrite, kFunction };
+EndpointKind endpoint_kind(int idx);
 bool is_endpoint_ref_valid(endpoint_ref_t endpoint_ref);
 bool set_endpoint_from_float(endpoint_ref_t endpoint_ref, float value);
 }

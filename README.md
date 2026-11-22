@@ -1,6 +1,6 @@
 # xdrive-robotics
 
-Firmware for the **MKS XDRIVE Mini** (an ODrive v3.6 clone) for robotics, based on **ODrive v0.5.6**, plus the host tools that flash, configure and bench-test it. It adds an encoder correction table, safety faults, impedance control with a CAN command, regen limits and 8 kHz capture, and it flashes over USB with no ST-Link.
+Firmware for the **MKS XDRIVE Mini** (an ODrive v3.6 clone) for robotics, based on **ODrive v0.5.6**, plus the host tools that flash, configure and bench-test it. It adds an encoder correction table, safety faults, impedance control with a CAN command, access to every setting over CAN, regen limits and 8 kHz capture, and it flashes over USB with no ST-Link.
 
 This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerbase.
 
@@ -12,7 +12,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 |---|---|---|
 | Board | MKS XDRIVE Mini, reports hw 3.6, 56 V variant, onboard AS5047P | Other single-motor ODrive v3.6 clones (ODESC and others). Not supported: dual-motor boards such as the ODrive v3.6 itself |
 | Motor | DJI 10018 (77 KV, 21 pole pairs) at 24 V, unloaded rotor on a bench stand | Other motors, motors under load |
-| CAN | The impedance command's codec, against the firmware header on the host | A real bus |
+| CAN | The impedance and endpoint-access codecs, against the firmware headers on the host | A real bus |
 | Host | macOS, Python 3.11 | Linux, Windows |
 
 ## What it adds to ODrive v0.5.6
@@ -28,6 +28,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 - **Closed-loop entry starts from rest:** zero velocity and torque setpoints, no running trajectory.
 - **Impedance control** (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4): torque = `input_kp` x position error + `input_kd` x velocity error + `input_torque`, with no integrator.
 - **CAN impedance command** (CANSimple ID 0x1E): position, velocity, kp, kd and torque in 8 bytes, answered at once on the same ID with position, velocity, measured torque, flags, FET temperature and bus voltage. Layout: `src/communication/can/impedance_frame.hpp`; host codec: `tools/impedance_frame.py`.
+- **Endpoint access over CAN** (CANSimple ID 0x1F): read or write any property, call any function, and read the interface JSON and the capture buffer, by the endpoint IDs USB uses. A board can be configured, tuned, saved and rebooted with no USB connection. Layout: `src/communication/can/endpoint_frame.hpp`; host codec: `tools/endpoint_frame.py`.
 - **Regen limits**, off by default: flux braking above a bus voltage (`motor.config.flux_brake_start_voltage`), and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`) that burn regen in the windings before cutting braking torque.
 - **High-rate capture** (`odrv.capture`): up to 8 properties at the 8 kHz control rate into a 32 KiB RAM buffer, with a level, manual or immediate trigger, read back in about 0.2 s.
 
@@ -40,7 +41,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 | [Getting started](docs/getting-started.md) | Wiring, flashing, configuring and calibrating a Mini, first moves |
 | [Migrating from Makerbase's firmware](docs/migrating-from-stock.md) | What changes from the stock v0.5.1, and carrying settings over |
 | [Control](docs/control.md) | Control modes, input modes, impedance control, tuning |
-| [CAN](docs/can.md) | Wiring and termination, the message table, the impedance command |
+| [CAN](docs/can.md) | Wiring and termination, the message table, the impedance command, endpoint access |
 | [Safety and regen](docs/safety-and-regen.md) | Faults, the watchdog hold, braking energy, ground loops |
 | [Encoders](docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
 | [Hardware](docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |

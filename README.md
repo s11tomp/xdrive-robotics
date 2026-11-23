@@ -116,6 +116,8 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `sample.py` | Read-only ~340 Hz sampler over USB |
 | `move_test.py`, `hold_ab.py`, `disturb_test.py` | Motor moves. Trapezoidal moves, hold-noise comparisons and disturbance rejection, logged |
 | `safety_test.py`, `impedance_test.py`, `regen_test.py`, `capture_test.py` | Bench tests of the added features with PASS/FAIL checks (all but `capture_test.py` move the motor) |
+| `hold_sweep.py` | Motor moves (small). Holding current and position error at evenly spaced angles, approached from both sides: separates position-dependent torque (cogging, gearbox detents) from static friction |
+| `runin.py` | Motor runs continuously. Constant-speed run-in that reverses at a fixed interval, with stall, drag and temperature stops and a per-second log |
 | `regress.py` | Motor moves. Regression suite compared with a saved baseline, at a fixed rotor angle (`--hold-at`) |
 | `move_to.py` | Motor moves. Turns the rotor to a fractional-turn angle and leaves it IDLE |
 | `demo.py` | Motor moves. A demo for an audience: moves and a sine sweep in a loop (`--loop N`, or until Ctrl-C), or with `--spring [S]` only a spring to twist by hand |

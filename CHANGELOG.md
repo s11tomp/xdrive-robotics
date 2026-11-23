@@ -18,6 +18,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - Flux braking (`motor.config.flux_brake_start_voltage`, `flux_brake_gain`) and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`).
 - High-rate capture (`odrv.capture`), replacing the hard-wired oscilloscope buffer.
 - Build with plain make (`make`), and host tools for flashing over USB DFU or SWD, configuration and bench tests (`tools/`).
+- Bench tools for a load on the rotor, such as a gearbox: `hold_sweep.py` (holding current and position error over a span of angles, approached from both sides, separating position-dependent torque from static friction) and `runin.py` (timed constant-speed run-in, reversing at an interval, with stall, drag and temperature stops).
 - Host library `xdrive` (`tools/xdrive/`): typed reads, writes and function calls on a board over USB, with every property and function named in the generated `xdrive.props` (`board.get(odrv.axis0.encoder.pos_estimate)`), checked by mypy. It speaks the firmware's USB protocol itself, without the `odrive` Python package. Over CAN (`xdrive.can`, with python-can), the same board API runs through endpoint access, and a `Bus` lists nodes by heartbeat and sends one impedance command per joint per control cycle.
 - A CAN database for this firmware's CANSimple messages, the impedance command included (`docs/cansimple.dbc`), and `make test`, which runs ODrive's unit tests and the host tools' tests without a board.
 

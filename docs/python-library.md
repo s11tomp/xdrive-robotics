@@ -109,7 +109,7 @@ A name that the board's build lacks fails only when it is used, so a script writ
 
 ## CAN
 
-`xdrive.can.open()` passes its arguments to python-can's `can.Bus` and returns an `xdrive.can.Bus`, which owns it. Any python-can interface works; on macOS a candleLight (gs_usb) adapter such as a CANable is `interface="gs_usb"`, with pyusb and libusb as for USB.
+`xdrive.can.open()` passes its arguments to python-can's `can.Bus` and returns an `xdrive.can.Bus`, which owns it. Any python-can interface works; on macOS a candleLight (gs_usb) adapter such as a CANable is `interface="gs_usb"`, with pyusb and libusb as for USB, plus python-can's driver package `gs_usb` (in `requirements.txt`).
 
 ```python
 from xdrive import can

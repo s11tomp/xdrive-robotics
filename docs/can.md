@@ -2,7 +2,7 @@
 
 Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus two messages of this firmware's: the impedance command (0x1E), which sends a full setpoint and gets the joint's state back in one frame pair, and endpoint access (0x1F), which reads and writes any setting and calls any function, so a board can be configured, tuned and saved without USB.
 
-> **Status:** the impedance and endpoint frames are tested on the host against the firmware's headers (`make test`), and impedance control is tested over USB. Neither has crossed a real bus yet, so the Python examples below are untested.
+> **Status:** the impedance and endpoint frames are tested on the host against the firmware's headers (`make test`), and impedance control is tested over USB. Neither has crossed a real bus yet, so the Python examples below are untested. `tools/can_test.py` is the bench test for one board on a bus ([Testing](testing.md)).
 
 ## Wiring
 

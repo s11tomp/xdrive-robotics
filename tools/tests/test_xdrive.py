@@ -443,11 +443,15 @@ def test_usb_reconnect_retries_while_the_board_enumerates(usb_device: FakeUsbDev
 class FakeCanBoard:
     """A board on python-can's virtual bus: endpoint access answered like
     src/communication/can/endpoint_frame.hpp over FakeLink's table, impedance commands answered with
-    their position, velocity and torque fields copied into the reply, and heartbeats every 20 ms.
-    save_configuration and reboot send no reply and leave the board silent for 0.2 s."""
+    their position, velocity and torque fields copied into the reply, and heartbeats every
+    axis0.config.can.heartbeat_rate_ms (20 ms unless changed). Endpoint reads and writes go through
+    the link's read and write. save_configuration and reboot send no reply and leave the board silent
+    for 0.2 s."""
 
-    def __init__(self, json_bytes: bytes, channel: str, node: int) -> None:
-        self.link = FakeLink(json_bytes)
+    def __init__(self, json_bytes: bytes, channel: str, node: int, link: FakeLink | None = None) -> None:
+        self.link = FakeLink(json_bytes) if link is None else link
+        self.link.put("axis0.config.can.node_id", node)
+        self.link.put("axis0.config.can.heartbeat_rate_ms", 20)
         for name, value in (("pos_range", 16.0), ("vel_range", 32.0), ("kp_max", 200.0), ("kd_max", 2.0),
                             ("torque_range", 4.0)):
             self.link.put(f"axis0.config.can.impedance_{name}", value)
@@ -471,7 +475,10 @@ class FakeCanBoard:
             if now >= self.down_until and now >= next_heartbeat:
                 self._send(xcan.MSG_HEARTBEAT, struct.pack("<IBBBB", self.link.value("axis0.error"),
                                                            self.link.value("axis0.current_state"), 0, 0, 0x80))
-                next_heartbeat = now + 0.02
+                interval = self.link.value("axis0.config.can.heartbeat_rate_ms") / 1000
+                next_heartbeat += interval              # on the grid, so the recv timeout adds no drift
+                if next_heartbeat <= now:               # the first heartbeat, or after a reboot's silence
+                    next_heartbeat = now + interval
             msg = self.bus.recv(0.005)
             if msg is None or time.monotonic() < self.down_until or msg.arbitration_id >> 5 != self.node:
                 continue
@@ -528,10 +535,10 @@ class FakeCanBoard:
                 return reply(S.WRONG_KIND)
             if any(value[size:]):
                 return reply(S.BAD_VALUE)
-            link.values[eid] = value[:size]
+            link.write(eid, value[:size])
         elif op != ep_frame.Op.READ:
             return reply(S.BAD_OPCODE)
-        return reply(S.OK, link.values[eid].ljust(4, b"\0"))
+        return reply(S.OK, link.read(eid, size).ljust(4, b"\0"))
 
     def stop(self) -> None:
         self._stop.set()

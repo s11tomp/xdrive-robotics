@@ -17,7 +17,8 @@ pos_estimate counts from boot, so a later run with the same --start holds at the
 while the board has not rebooted. A --start up to 100 turns away is reached with a trap move first.
 
 Uses the move_test guards (errors, following error, current not following, speed) and the board's
-current trap-trajectory settings unless given on the command line (RAM only). Always ends in IDLE with every
+current trap-trajectory settings unless given on the command line (RAM only); stops before moving when the trap
+vel_limit is above the controller's vel_limit, which the rotor can't follow. Always ends in IDLE with every
 touched setting restored. Nothing is saved.
 
 Usage:
@@ -118,6 +119,11 @@ def main():
     rec.max_vel = trap["vel_limit"] * 1.5 + 1.0
     results, abort_reason, start = [], None, args.start
     try:
+        vel_limit = b.get(ax.controller.config.vel_limit)
+        if trap["vel_limit"] > vel_limit:
+            # the rotor can't follow a trajectory faster than the velocity limit: the following-error guard trips
+            raise Abort(f"trap vel_limit {trap['vel_limit']:g} turn/s is above controller vel_limit {vel_limit:g}; "
+                        f"pass --trap-vel {vel_limit:g} or lower")
         b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
         deadline = time.monotonic() + 1.0
         while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:

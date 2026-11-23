@@ -27,6 +27,7 @@ Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
 - The CAN thread's stack is 4 KB, the USB thread's size (ODrive: 1 KB): endpoint access runs the same handlers as USB.
 - The brake resistor's PWM (TIM2) runs at 16 kHz, restarted by every TIM1 update event, so its edges stay at least 1.1 us from each current sample. Running free at 10.25 kHz, its edges crossed the samples several times a second and corrupted those readings by up to 2.2 A for one control period.
+- `input_torque` is torque feed-forward in the velocity ramp, position filter and trapezoidal trajectory input modes too, added to their `inertia` term (ODrive v0.5.6 replaced it with that term), and the trajectory applies it after a move as well (`feedforward_test.py` checks it on the bench). The torque fields of CAN Set Input Pos (0x00C) and Set Input Vel (0x00D) therefore act in those modes.
 - `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
 - The host tools use the `xdrive` library; `requirements.txt` no longer holds the `odrive` package or its `ipython` pin. Error flags print at full width, motor error bits 32-35 included.
 - `sample.py` reads about 340 samples per second (150 before), `move_test.py` about 275 (200), and the capture readout takes 0.13 s (0.23). Two CSV columns take their v0.5.6 names: `axis0.motor.fet_thermistor.temperature` and `axis0.motor.I_bus`.

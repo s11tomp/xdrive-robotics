@@ -24,6 +24,7 @@ The host tools' tests check:
 |---|---|---|---|---|
 | `safety_test.py` | Moves, about 1 min | 24 | Watchdog disarm and decelerate-and-hold (with and without a torque cap); soft limits in trap, velocity and torque control, and entering closed loop outside them; position and velocity following errors | 24/24 |
 | `impedance_test.py` | Moves, about 25 s | 10 | Stiffness T/kp at kp 20 and 80; a setpoint step; a trap move; damping only; the watchdog hold from impedance control | 10/10 |
+| `feedforward_test.py` | Moves, about 20 s | 15 | `input_torque` as torque feed-forward: added to the `inertia` term while a trap move accelerates and decelerates (position and impedance control) and applied before and after it; the position filter and the velocity ramp ride on it and settle to it | 15/15 |
 | `regen_test.py` | Moves, about 35 s, hard stops | 6 | Brake resistor duty; flux braking's d-axis current and its copper loss; flux braking and `I_bus_soft_min` against a hard stop; `I_bus_soft_max` against the draw while accelerating | 6/6 |
 | `can_test.py` | Moves, about 45 s; the board reboots twice | 25 | Over a CAN adapter: heartbeats; endpoint access (read-back, a function call, a refusal, round-trip latency); a save-and-reboot round trip; `impedance_test.py`'s checks through the impedance frame, with a host-streamed move in place of the trap move; command-to-reply latency at the cycle rate and back to back; the CAN thread's stack | Not run yet |
 | `capture_test.py` | None | 14 | Capture's sample clock, data types, triggers, rejections and cost per control period | 14/14 |
@@ -40,7 +41,7 @@ The host tools' tests check:
 1. Configure and calibrate it ([Getting started](getting-started.md)).
 2. `python tools/dump_board.py --compare <your settings>.json`: 0 differences and no errors.
 3. No motion: `python tools/capture_test.py`.
-4. Motor moves: `python tools/safety_test.py`, then `impedance_test.py` and `regen_test.py`. Keep the rotor free of any load; the tests assume an unloaded rotor (regen's limits and the stiffness checks depend on it).
+4. Motor moves: `python tools/safety_test.py`, then `impedance_test.py`, `feedforward_test.py` and `regen_test.py`. Keep the rotor free of any load; the tests assume an unloaded rotor (regen's limits and the stiffness checks depend on it).
 5. With a USB-CAN adapter on the board's bus (wiring in [CAN](can.md)), motor moves and the board reboots twice: `python tools/can_test.py`. Set `can.config.baud_rate` to 1000000 and a node ID over USB first.
 6. Motor moves: `python tools/regress.py --tag first --compare <your settings>.json --save-baseline --hold-at 0.5` saves a baseline for this board (`configs/regress-baseline_<serial>.json`).
 7. After a firmware or setting change: `python tools/regress.py --tag <change> --compare <your settings>.json` compares every metric with the baseline and flags anything worse than its tolerance.

@@ -15,6 +15,8 @@ Entering closed loop starts from rest in every mode: the velocity and torque set
 
 `controller.config.input_mode` shapes how the inputs (`input_pos`, `input_vel`, `input_torque`) become setpoints.
 
+Outside torque control, `input_torque` is torque feed-forward in every input mode. The velocity ramp, the position filter and the trapezoidal trajectory add it to their own feed-forward (`controller.config.inertia` times the planned acceleration), and the trajectory keeps applying it once a move ends. A host can send gravity compensation this way while the board plans the moves, for example as the torque field of CAN Set Input Pos (0x00C).
+
 ### Passthrough (1)
 
 The inputs are the setpoints. Use it with impedance control, and when the host already sends a smooth trajectory at a high rate.

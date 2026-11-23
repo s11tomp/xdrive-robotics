@@ -238,7 +238,7 @@ bool Controller::update() {
             float step = std::clamp(full_step, -max_step_size, max_step_size);
 
             vel_setpoint_ += step;
-            torque_setpoint_ = (step / current_meas_period) * config_.inertia;
+            torque_setpoint_ = (step / current_meas_period) * config_.inertia + input_torque_;
         } break;
         case INPUT_MODE_TORQUE_RAMP: {
             float max_step_size = std::abs(current_meas_period * config_.torque_ramp_rate);
@@ -259,7 +259,7 @@ bool Controller::update() {
             }
             float delta_vel = input_vel_ - vel_setpoint_; // Vel error
             float accel = input_filter_kp_*delta_pos + input_filter_ki_*delta_vel; // Feedback
-            torque_setpoint_ = accel * config_.inertia; // Accel
+            torque_setpoint_ = accel * config_.inertia + input_torque_; // Accel
             vel_setpoint_ += current_meas_period * accel; // delta vel
             pos_setpoint_ += current_meas_period * vel_setpoint_; // Delta pos
         } break;
@@ -271,6 +271,8 @@ bool Controller::update() {
                 move_to_pos(input_pos_);
                 input_pos_updated_ = false;
             }
+            // input_torque is feed-forward during a move (added to the inertia term) and after it
+            torque_setpoint_ = input_torque_;
             // Avoid updating uninitialized trajectory
             if (trajectory_done_)
                 break;
@@ -283,13 +285,12 @@ bool Controller::update() {
                 }
                 pos_setpoint_ = axis_->trap_traj_.Xf_;
                 vel_setpoint_ = 0.0f;
-                torque_setpoint_ = 0.0f;
                 trajectory_done_ = true;
             } else {
                 TrapezoidalTrajectory::Step_t traj_step = axis_->trap_traj_.eval(axis_->trap_traj_.t_);
                 pos_setpoint_ = traj_step.Y;
                 vel_setpoint_ = traj_step.Yd;
-                torque_setpoint_ = traj_step.Ydd * config_.inertia;
+                torque_setpoint_ += traj_step.Ydd * config_.inertia;
                 axis_->trap_traj_.t_ += current_meas_period;
             }
             anticogging_pos_estimate = pos_setpoint_; // FF the position setpoint instead of the pos_estimate

@@ -1138,7 +1138,8 @@ interfaces:
         unit: N·m
         doc: |
           In `CONTROL_MODE_TORQUE_CONTROL`, sets the desired output torque of the axis.
-          In `CONTROL_MODE_VELOCITY_CONTROL`, `CONTROL_MODE_POSITION_CONTROL` and `CONTROL_MODE_IMPEDANCE_CONTROL`, sets the feed-forward torque of the torque controller.
+          In `CONTROL_MODE_VELOCITY_CONTROL`, `CONTROL_MODE_POSITION_CONTROL` and `CONTROL_MODE_IMPEDANCE_CONTROL`, sets the feed-forward torque of the torque controller,
+          in every input mode: `INPUT_MODE_VEL_RAMP`, `INPUT_MODE_POS_FILTER` and `INPUT_MODE_TRAP_TRAJ` add it to their `config.inertia` term.
           In `INPUT_MODE_TUNING`, this acts as a DC offset for the torque sine wave.
       input_kp:
         type: float32
@@ -1844,6 +1845,7 @@ valuetypes:
 
           ### Valid inputs:
           * `input_vel`
+          * `input_torque` (feed-forward, added to the `config.inertia` term)
 
           ### Valid Control Modes:
           * `CONTROL_MODE_VELOCITY_CONTROL`
@@ -1862,6 +1864,7 @@ valuetypes:
 
           ### Valid inputs:
           * `input_pos`
+          * `input_torque` (feed-forward, added to the `config.inertia` term)
 
           ### Valid Control modes:
           * `CONTROL_MODE_POSITION_CONTROL`
@@ -1880,9 +1883,11 @@ valuetypes:
 
           ### Valid Inputs:
           * `input_pos`
+          * `input_torque` (feed-forward, added to the `config.inertia` term during a move, and applied alone after it)
 
           ### Valid Control Modes:
           * `CONTROL_MODE_POSITION_CONTROL`
+          * `CONTROL_MODE_IMPEDANCE_CONTROL`
       TORQUE_RAMP:
         brief: Ramp a torque command from the current value to the target value.
         doc: |

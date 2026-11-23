@@ -115,7 +115,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `capture.py` | Records up to 8 properties at 8 kHz with the firmware's capture |
 | `sample.py` | Read-only ~340 Hz sampler over USB |
 | `move_test.py`, `hold_ab.py`, `disturb_test.py` | Motor moves. Trapezoidal moves, hold-noise comparisons and disturbance rejection, logged |
-| `safety_test.py`, `impedance_test.py`, `regen_test.py`, `capture_test.py`, `can_test.py` | Bench tests of the added features with PASS/FAIL checks (all but `capture_test.py` move the motor; `can_test.py` runs over a USB-CAN adapter) |
+| `safety_test.py`, `impedance_test.py`, `feedforward_test.py`, `regen_test.py`, `capture_test.py`, `can_test.py` | Bench tests of the added features with PASS/FAIL checks (all but `capture_test.py` move the motor; `can_test.py` runs over a USB-CAN adapter) |
 | `hold_sweep.py` | Motor moves (small). Holding current and position error at evenly spaced angles, approached from both sides: separates position-dependent torque (cogging, gearbox detents) from static friction |
 | `runin.py` | Motor runs continuously. Constant-speed run-in that reverses at a fixed interval, with stall, drag and temperature stops and a per-second log |
 | `regress.py` | Motor moves. Regression suite compared with a saved baseline, at a fixed rotor angle (`--hold-at`) |

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Bench test of one board over CAN.  *** MOTOR MOVES (impedance: about 20 s, up to 4 turns) and the board
-reboots twice (save: its startup sequence runs each time) ***
+"""Bench test of one board over CAN.  *** MOTOR MOVES (impedance: about 20 s, up to 4 turns; current: five
+small torque steps against a spring) and the board reboots twice (save: its startup sequence runs each time) ***
 
 Stages; the bus checks always run first, then --tests in this order:
   bus        the node sends heartbeats (no --node: the only node heard is the one tested)
@@ -18,8 +18,18 @@ Stages; the bus checks always run first, then --tests in this order:
   latency    3 s of impedance cycles at --rate Hz (no missed replies, round trip within the period), then
              3 s back to back (the fastest cycle rate one board allows); CAN thread stack high-water mark
              and CAN error flags afterwards
+  current    command to current: five 0.5 Nm torque steps through the impedance frame while the spring
+             (kp 20) holds the rotor. On the board, an 8 kHz capture triggered by input_torque times the
+             Iq setpoint and the measured current (10 % and 90 % of the step) from the moment the
+             controller sees the command; on the host, back-to-back cycles time the first reply whose
+             torque (from the measured current) shows half the step: within one --rate period
+  load       six joints' traffic: every cycle also carries five absent joints' commands and replies
+             (nodes the bus scan didn't hear; the stage refuses if another node is on the bus), at
+             250 Hz and 500 Hz (no missed replies, the whole cycle within the period), then back to
+             back; CAN error flags afterwards
 
-Every impedance cycle is logged to logs/<stamp>_node<N>_can-<stage>.csv; the checks and the latency
+Every impedance cycle is logged to logs/<stamp>_node<N>_can-<stage>.csv, the current stage's capture
+windows to logs/<stamp>_node<N>_can-current-capture.csv; the checks and the latency
 numbers go to logs/<stamp>_node<N>_can-test.json. RAM-only settings, restored at the end; ends IDLE.
 Exit code 1 if any check fails.
 
@@ -43,15 +53,19 @@ import sys
 import time
 from typing import Any
 
+import numpy as np
+
 import can as python_can
 
 from xdrive import can, report
 from xdrive.board import Board
 from xdrive.enums import AxisState, ControlMode, InputMode, WatchdogAction
 from xdrive.errors import LinkError, Refused, XdriveError
-from xdrive.impedance_frame import Reply
+from xdrive.impedance_frame import MSG_IMPEDANCE, Reply
 from xdrive.model import RwProp
 from xdrive.props import odrv
+
+import capture
 
 WORKDIR = pathlib.Path.cwd()  # logs/ goes under the working directory
 LOGS = WORKDIR / "logs"
@@ -59,7 +73,14 @@ RUNAWAY = 12.0           # turn/s: IDLE immediately above this
 POS_MARGIN = 5.0         # turn: the impedance stage travels up to 4 turns from where it starts
 MAX_MISSED = 25          # consecutive missed replies before the run aborts
 FRAME_BITS = 130         # one 8-byte frame with bit stuffing: 0.13 ms at 1 Mbit/s (docs/can.md)
-TESTS = ["endpoint", "save", "impedance", "latency"]
+TESTS = ["endpoint", "save", "impedance", "latency", "current", "load"]
+STEP_TORQUE = 0.5        # Nm: the current stage's torque step, about 4.7 A on a 10018
+STEPS = 5                # torque steps in the current stage
+CAPTURE_FIELDS = ["axis0.controller.input_torque", "axis0.controller.torque_setpoint",
+                  "axis0.motor.current_control.Iq_setpoint", "axis0.motor.current_control.Iq_measured"]
+WINDOW = (16, 80)        # capture samples read before and after the trigger: 2 ms and 10 ms at 8 kHz
+LOAD_JOINTS = 5          # the joints the load stage stands in for, besides the tested one
+LOAD_FRAME = bytes.fromhex("8a3c51e07f2d96b4")  # payload of each load frame
 
 ax = odrv.axis0
 ctl = ax.controller.config
@@ -123,11 +144,15 @@ class Bench:
         return self.connected
 
     # --- impedance cycles -----------------------------------------------------------------------
-    def stream(self, seconds, command, event, rate=None, allow_error=False, require_armed=True):
+    def stream(self, seconds, command, event, rate=None, allow_error=False, require_armed=True, load=()):
         """Sends command (an Impedance, or a function of the time since the start) once per cycle for
-        `seconds` at `rate` Hz (default --rate; 0: back to back), each reply awaited up to one period.
-        Returns this call's rows. Aborts on a runaway, an unexpected error flag or disarm, or
-        MAX_MISSED replies missed in a row."""
+        `seconds` at `rate` Hz (default --rate; 0: back to back), each reply awaited up to one --rate
+        period. Returns this call's rows. Aborts on a runaway, an unexpected error flag or disarm, or
+        MAX_MISSED replies missed in a row.
+
+        load: node IDs of absent joints. Each cycle then sends their commands (LOAD_FRAME) ahead of the
+        tested node's and their replies after its reply, so the bus carries every joint's traffic; a
+        row's rtt covers the whole cycle."""
         rate = self.rate if rate is None else rate
         period = 1.0 / rate if rate else 0.0
         timeout = 1.0 / self.rate
@@ -136,7 +161,11 @@ class Bench:
         next_t = start
         while (now := time.perf_counter()) - start < seconds:
             cmd = command(now - start) if callable(command) else command
+            for n in load:
+                self.bus.send_raw(can.arbitration_id(n, MSG_IMPEDANCE), LOAD_FRAME)
             reply = self.bus.cycle({self.node: cmd}, timeout)[self.node]
+            for n in load:
+                self.bus.send_raw(can.arbitration_id(n, MSG_IMPEDANCE), LOAD_FRAME)
             row = Row(now - self.t0, event, cmd, reply, time.perf_counter() - now)
             event = ""
             rows.append(row)
@@ -437,6 +466,119 @@ def test_latency(b):
     return b.log("latency")
 
 
+def first_at(t, fraction, level):
+    """Time of the first sample at t >= 0 whose fraction of the step reaches `level`, in ms; None if none does."""
+    hits = np.nonzero((t >= 0) & (fraction >= level))[0]
+    return None if len(hits) == 0 else 1e3 * float(t[hits[0]])
+
+
+def test_current(b):
+    """Command to current: STEPS torque steps of STEP_TORQUE through the impedance frame while the spring
+    holds the rotor. On the board, an 8 kHz capture triggered by input_torque (the moment the CAN
+    thread applies the command) times the measured current; on the host, back-to-back cycles time the
+    first reply whose torque (from the measured current) shows half the step. Iq's sign follows the
+    motor's direction, so the board's times use each signal's fraction of the Iq setpoint's step."""
+    print("current")
+    board = b.board
+    hold = b.arm(20.0, 0.3)
+    step = dataclasses.replace(hold, torque=STEP_TORQUE)
+    steps: list[dict[str, Any]] = []
+    windows = []
+    for i in range(STEPS):
+        fields, types = capture.setup(board, CAPTURE_FIELDS, trigger=(CAPTURE_FIELDS[0], capture.RISING, STEP_TORQUE / 2))
+        before = b.stream(0.2, hold, "hold", rate=0)
+        rows = b.stream(0.2, step, f"step_{i}", rate=0)
+        try:
+            capture.wait_done(board, 1.0)
+        except capture.CaptureError:
+            steps.append({"triggered": False})
+            b.stream(0.3, hold, "release", rate=0)
+            continue
+        t, data, _ = capture.read(board, fields, types, window=WINDOW)
+        b.stream(0.3, hold, "release", rate=0)
+        iq_sp, iq = data[CAPTURE_FIELDS[2]], data[CAPTURE_FIELDS[3]]
+        pre = t < 0
+        sp0, iq0 = float(iq_sp[pre].mean()), float(iq[pre].mean())
+        d_sp = float(iq_sp[(t >= 0) & (t < 0.0005)].mean()) - sp0      # the setpoint's step, A (signed)
+        base = b.mean(before, "torque", 0.1)
+        seen = next((r for r in rows if r.reply is not None and r.reply.torque - base >= 0.5 * STEP_TORQUE), None)
+        steps.append({"triggered": True, "iq_setpoint_step_a": d_sp,
+                      "applied_to_setpoint_ms": first_at(t, (iq_sp - sp0) / d_sp, 0.5),
+                      "applied_to_10pct_current_ms": first_at(t, (iq - iq0) / d_sp, 0.1),
+                      "applied_to_90pct_current_ms": first_at(t, (iq - iq0) / d_sp, 0.9),
+                      "host_send_to_reply_ms": None if seen is None else 1e3 * (seen.t + seen.rtt - rows[0].t)})
+        windows.append((i, t, data))
+    b.idle()
+
+    done = [s for s in steps if s["triggered"]]
+    b.check("the CAN command reaches the controller in every step", len(done) == STEPS,
+            f"the capture triggered on input_torque in {len(done)} of {STEPS} steps")
+    def med(key):
+        vals = [s[key] for s in done if s.get(key) is not None]
+        return statistics.median(vals) if len(vals) == len(done) and vals else None
+    s = b.stats["command_to_current"] = {"steps": steps, "step_torque_nm": STEP_TORQUE,
+                                         **{f"median_{k}": med(k) for k in ("applied_to_setpoint_ms", "applied_to_10pct_current_ms",
+                                            "applied_to_90pct_current_ms", "host_send_to_reply_ms")}}
+    one_way = b.stats.get("cycle_back_to_back", {}).get("median_ms")
+    if one_way is not None and s["median_applied_to_90pct_current_ms"] is not None:
+        # Estimate: half a round trip stands in for the one-way command time, which no shared clock measures.
+        s["estimate_send_to_90pct_current_ms"] = one_way / 2 + s["median_applied_to_90pct_current_ms"]
+    print(f"  on the board, command applied -> Iq setpoint {s['median_applied_to_setpoint_ms']} ms, measured current "
+          f"10 % {s['median_applied_to_10pct_current_ms']} ms, 90 % {s['median_applied_to_90pct_current_ms']} ms (medians)")
+    if "estimate_send_to_90pct_current_ms" in s:
+        print(f"  estimate, host send -> 90 % current: {s['estimate_send_to_90pct_current_ms']:.2f} ms "
+              "(half the back-to-back round trip plus the board's part)")
+    host = [st["host_send_to_reply_ms"] for st in done]
+    worst = max((h for h in host if h is not None), default=None)
+    b.check(f"the current shows in a reply within the {1e3 / b.rate:g} ms period at {b.rate:g} Hz",
+            done and None not in host and worst is not None and worst < 1e3 / b.rate,
+            f"host send -> first reply with half the step: {', '.join('none' if h is None else f'{h:.2f}' for h in host)} ms")
+
+    path = LOGS / f"{b.stamp}_node{b.node}_can-current-capture.csv"
+    with path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["step", "t_ms"] + CAPTURE_FIELDS)
+        for i, t, data in windows:
+            for k in range(len(t)):
+                w.writerow([i, f"{1e3 * t[k]:.3f}"] + [f"{float(data[c][k]):.5f}" for c in CAPTURE_FIELDS])
+    return [b.log("current"), path]
+
+
+def test_load(b):
+    """Six joints' traffic with one board: each cycle also carries LOAD_JOINTS absent joints' commands
+    and replies, at 250 Hz, 500 Hz and back to back."""
+    print("load")
+    board = b.board
+    others = [n for n in b.bus.scan() if n != b.node]
+    if others:
+        raise Unexpected(f"nodes {others} are on the bus: the load stage's frames would command them; "
+                         "run it with only the tested board on the bus")
+    load = [n for n in range(64) if n != b.node][:LOAD_JOINTS]
+    frames = 2 * (LOAD_JOINTS + 1)
+    hold = b.arm(20.0, 0.3)
+    for rate in (250.0, 500.0):
+        rows = b.stream(3.0, hold, f"load_{rate:g}Hz", rate=rate, load=load)
+        got = [r.rtt for r in rows if r.reply is not None]
+        missed = len(rows) - len(got)
+        s = b.stats[f"load_{rate:g}hz"] = {"rate_hz": rate, "cycles": len(rows), "missed": missed,
+                                           "bus_load_pct": 100 * rate * frames * b.frame_s, **stats_ms(got)}
+        b.check(f"no missed replies at {rate:g} Hz with {LOAD_JOINTS + 1} joints' traffic", missed == 0,
+                f"{missed} of {len(rows)}; bus load about {s['bus_load_pct']:.0f} %")
+        b.check(f"a {LOAD_JOINTS + 1}-joint cycle fits the {1e3 / rate:g} ms period (p99)", s["p99_ms"] < 1e3 / rate,
+                f"median {s['median_ms']:.2f} ms, p99 {s['p99_ms']:.2f} ms, max {s['max_ms']:.2f} ms")
+    rows = b.stream(3.0, hold, "load_back_to_back", rate=0, load=load)
+    got = [r.rtt for r in rows if r.reply is not None]
+    fastest = len(rows) / (rows[-1].t - rows[0].t)
+    s = b.stats["load_back_to_back"] = {"rate_hz": fastest, "cycles": len(rows), "missed": len(rows) - len(got),
+                                        "bus_load_pct": 100 * fastest * frames * b.frame_s, **stats_ms(got)}
+    print(f"  back to back with {LOAD_JOINTS + 1} joints' traffic: {fastest:.0f} cycles/s, median {s['median_ms']:.2f} ms, "
+          f"missed {s['missed']}; bus load about {s['bus_load_pct']:.0f} %")
+    err = board.get(odrv.can.error)
+    b.check("no CAN error flags after the load", not err, f"can.error {report.flag_names(err)}")
+    b.idle()
+    return b.log("load")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--interface", default="gs_usb", help="python-can interface (default gs_usb: candleLight adapters)")
@@ -480,6 +622,10 @@ def main(argv: list[str] | None = None) -> int:
                     logs.append(str(test_impedance(b).relative_to(WORKDIR)))
                 elif name == "latency":
                     logs.append(str(test_latency(b).relative_to(WORKDIR)))
+                elif name == "current":
+                    logs += [str(p.relative_to(WORKDIR)) for p in test_current(b)]
+                elif name == "load":
+                    logs.append(str(test_load(b).relative_to(WORKDIR)))
         except (Unexpected, XdriveError, KeyboardInterrupt) as ex:
             abort = repr(ex)
             print(f"ABORT: {abort}")

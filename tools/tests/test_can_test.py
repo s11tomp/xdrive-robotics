@@ -3,7 +3,8 @@
 The fake answers endpoint access like the firmware and echoes impedance commands as replies, so the
 checks that need a real rotor (stiffness, the watchdog hold) fail here. The fake's thread can miss a
 reply deadline under load, so the timing checks may fail too; every other check passes, and the run
-must end with the axis IDLE, the gains zero and the settings restored.
+must end with the axis IDLE, the gains zero and the settings restored. The fake has no capture, so the
+current stage stays out.
 """
 from __future__ import annotations
 
@@ -21,7 +22,9 @@ import can_test  # noqa: E402
 
 NEEDS_A_ROTOR = {"kp 20: T +0.5 Nm deflects T/kp", "kp 20: T -0.5 Nm deflects T/kp", "kp 80: T +0.5 Nm deflects T/kp",
                  "a pause in the commands starts the hold", "commands are ignored during the hold"}
-TIMING = {"no missed replies at 100 Hz", "round trip within the 10 ms period (p99)"}
+TIMING = {"no missed replies at 100 Hz", "round trip within the 10 ms period (p99)",
+          "no missed replies at 250 Hz with 6 joints' traffic", "a 6-joint cycle fits the 4 ms period (p99)",
+          "no missed replies at 500 Hz with 6 joints' traffic", "a 6-joint cycle fits the 2 ms period (p99)"}
 
 
 class BenchLink(FakeLink):
@@ -72,7 +75,8 @@ def test_full_run_against_a_fake_board(board: tuple[str, FakeCanBoard], tmp_path
     monkeypatch.setattr(can_test, "WORKDIR", tmp_path)
     monkeypatch.setattr(can_test, "LOGS", tmp_path / "logs")
 
-    code = can_test.main(["--interface", "virtual", "--channel", channel, "--rate", "100"])
+    code = can_test.main(["--interface", "virtual", "--channel", channel, "--rate", "100",
+                          "--tests", "endpoint,save,impedance,latency,load"])
 
     out_path, = (tmp_path / "logs").glob("*_node3_can-test.json")
     out: dict[str, Any] = json.loads(out_path.read_text())
@@ -83,9 +87,10 @@ def test_full_run_against_a_fake_board(board: tuple[str, FakeCanBoard], tmp_path
     names = {c["check"] for c in out["checks"]}
     assert {"node ID and baud rate read back", "saved value survives the reboot (changed)",
             "saved value survives the reboot (restored)", "clear_errors over CAN resumes impedance control",
-            "no missed replies at 100 Hz"} <= names
+            "no missed replies at 100 Hz", "no CAN error flags after the load"} <= names
     assert out["stats"]["cycle_back_to_back"]["rate_hz"] > 100
-    assert sorted(p.split("can-")[-1] for p in out["logs"]) == ["impedance.csv", "latency.csv"]
+    assert sorted(p.split("can-")[-1] for p in out["logs"]) == ["impedance.csv", "latency.csv", "load.csv"]
+    assert out["stats"]["load_back_to_back"]["cycles"] > 0
 
     link = fake.link
     assert link.value("axis0.current_state") == 1 and link.value("axis0.requested_state") == 1

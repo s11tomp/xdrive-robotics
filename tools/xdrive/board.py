@@ -156,11 +156,11 @@ class Board:
             raise InterfaceMismatch(f"{self.describe()}: the board's firmware has no function {p.path}")
         return fn.id
 
-    def read_buffer(self, endpoint_id: int, size: int) -> bytes:
-        """`size` bytes of a buffer endpoint (the capture readout), read from offset 0 chunk by chunk."""
+    def read_buffer(self, endpoint_id: int, size: int, offset: int = 0) -> bytes:
+        """`size` bytes of a buffer endpoint (the capture readout) from `offset` on, read chunk by chunk."""
         out = bytearray()
         while len(out) < size:
-            chunk = self.link.read_buffer(endpoint_id, len(out))
+            chunk = self.link.read_buffer(endpoint_id, offset + len(out))
             if not chunk:
                 raise Refused(f"{self.describe()}: buffer endpoint {endpoint_id} ended after {len(out)} of {size} bytes")
             out += chunk

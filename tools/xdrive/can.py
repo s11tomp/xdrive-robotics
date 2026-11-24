@@ -161,6 +161,11 @@ class Bus:
         except can.CanError as ex:
             raise LinkError(f"CAN: can't send to ID 0x{arb_id:03x}: {ex}") from ex
 
+    def send_raw(self, arb_id: int, data: bytes) -> None:
+        """Sends one standard-ID frame as given, awaiting nothing: traffic for bus-load tests. Handing
+        it to the adapter may take up to the bus's timeout."""
+        self._send(arb_id, data, self.timeout)
+
     def endpoint_request(self, node: int, frame: bytes, timeout: float) -> ep.Reply:
         """Sends one endpoint-access request and returns its reply; LinkTimeout if none comes in time."""
         with self._node_locks[node]:
@@ -215,7 +220,9 @@ class Bus:
 
     def cycle(self, commands: Mapping[int, Impedance], timeout: float) -> dict[int, Reply | None]:
         """Sends one impedance command per node and returns each node's reply, None for a node that
-        didn't answer within `timeout`. Returns as soon as every node has answered."""
+        didn't answer within `timeout`. Returns as soon as every node has answered. Handing each frame
+        to the adapter may take up to the bus's own timeout (a USB adapter can stall for milliseconds);
+        only a longer stall raises LinkError."""
         missing = [n for n in commands if n not in self.ranges]
         if missing:
             raise KeyError(f"CAN nodes {missing}: connect() them first, to read their impedance ranges")
@@ -228,7 +235,7 @@ class Bus:
                 self._awaiting = set(commands)
             try:
                 for n, frame in frames.items():
-                    self._send(arbitration_id(n, MSG_IMPEDANCE), frame, timeout)
+                    self._send(arbitration_id(n, MSG_IMPEDANCE), frame, self.timeout)
                 with self._cond:
                     self._cond.wait_for(lambda: len(self._impedance_replies) == len(commands) or self._ended(),
                                         timeout)

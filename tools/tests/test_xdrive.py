@@ -295,6 +295,7 @@ def test_paths_give_plain_values_and_take_json_values(json_bytes: bytes) -> None
 def test_read_buffer_reads_chunks_up_to_the_size(json_bytes: bytes, chunk: int) -> None:
     board = Board(FakeLink(json_bytes, chunk))
     assert board.read_buffer(JSON_ENDPOINT, 1000) == json_bytes[:1000]
+    assert board.read_buffer(JSON_ENDPOINT, 100, offset=250) == json_bytes[250:350]
     with pytest.raises(Refused, match="ended after"):
         board.read_buffer(JSON_ENDPOINT, len(json_bytes) + 10)
     assert board.endpoint_id(odrv.vbus_voltage) == Interface(json_bytes).properties["vbus_voltage"].id
@@ -633,6 +634,32 @@ def test_can_heartbeats_and_scan(can_bus: xcan.Bus, fakes: list[FakeCanBoard]) -
     assert can_bus.heartbeat(5) is None
     fakes[1].stop()
     assert can_bus.scan(0.1) == [1]
+
+
+def test_can_cycle_gives_the_adapter_the_bus_timeout_to_take_a_frame(can_bus: xcan.Bus, fakes: list[FakeCanBoard],
+                                                                     cached_json: None,
+                                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    can_bus.connect(1)
+    timeouts: list[float | None] = []
+    send = can_bus._bus.send
+
+    def recording_send(msg: python_can.Message, timeout: float | None = None) -> None:
+        timeouts.append(timeout)
+        send(msg, timeout)
+
+    monkeypatch.setattr(can_bus._bus, "send", recording_send)
+    assert can_bus.cycle({1: xcan.Impedance(pos=0.0)}, timeout=0.004)[1] is not None
+    can_bus.send_raw(0x3E, bytes(8))
+    assert timeouts == [can_bus.timeout, can_bus.timeout]
+
+
+def test_can_send_raw_reaches_the_bus(can_bus: xcan.Bus, can_channel: str) -> None:
+    with python_can.Bus(interface="virtual", channel=can_channel) as listener:
+        can_bus.send_raw(0x3E, bytes(range(8)))
+        msg = listener.recv(1.0)
+        while msg is not None and msg.arbitration_id != 0x3E:  # skip the fakes' heartbeats
+            msg = listener.recv(1.0)
+    assert msg is not None and bytes(msg.data) == bytes(range(8)) and not msg.is_extended_id
 
 
 def test_can_cycle_lifecycle(can_bus: xcan.Bus, fakes: list[FakeCanBoard], cached_json: None) -> None:

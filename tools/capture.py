@@ -92,19 +92,23 @@ def wait_done(b, timeout):
         time.sleep(0.02)
 
 
-def read(b, fields, types):
-    """Read a DONE capture: returns (t [s] relative to the trigger sample, {field: np.ndarray}, meta)."""
+def read(b, fields, types, window=None):
+    """Read a DONE capture: returns (t [s] relative to the trigger sample, {field: np.ndarray}, meta).
+
+    window: (before, after) reads only the samples from `before` ahead of the trigger sample to
+    `after` past it (fewer at the buffer's ends), for a slow link such as CAN; None reads them all."""
     c = odrv.capture
     n, nch, decimation, trig = b.get(c.n_samples), b.get(c.n_channels), b.get(c.decimation), b.get(c.trigger_index)
     if nch != len(types):
         raise CaptureError(f"the capture has {nch} channels, expected {len(types)}")
+    lo, hi = (0, n) if window is None else (max(0, trig - window[0]), min(n, trig + window[1] + 1))
     t0 = time.monotonic()
-    raw = b.read_buffer(b.get(c.readout_endpoint), n * nch * 4)
+    raw = b.read_buffer(b.get(c.readout_endpoint), (hi - lo) * nch * 4, offset=lo * nch * 4)
     read_s = time.monotonic() - t0
-    words = np.frombuffer(raw, dtype="<u4").reshape(n, nch)
+    words = np.frombuffer(raw, dtype="<u4").reshape(hi - lo, nch)
     data = {f: words[:, i].view(DTYPES.get(ty, np.uint32)) for i, (f, ty) in enumerate(zip(fields, types))}
     period = max(decimation, 1) / CONTROL_HZ
-    t = (np.arange(n) - trig) * period
+    t = (np.arange(lo, hi) - trig) * period
     meta = {"n_samples": n, "channels": fields, "decimation": decimation, "period_s": period,
             "trigger_index": trig, "trigger_mode": b.get(c.trigger_mode).value, "readout_s": round(read_s, 3)}
     return t, data, meta

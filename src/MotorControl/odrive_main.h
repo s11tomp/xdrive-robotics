@@ -175,6 +175,7 @@ public:
     void erase_configuration() override;
     void reboot() override { NVIC_SystemReset(); }
     void enter_dfu_mode() override;
+    bool enter_can_bootloader() override;
     bool any_error();
     void clear_errors() override;
 

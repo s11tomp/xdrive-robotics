@@ -68,6 +68,14 @@ class ODrive3_enter_dfu_mode(Func[None]):
         return Call(self, ())
 
 
+class ODrive3_enter_can_bootloader(Func[bool]):
+    def __init__(self, path: str) -> None:
+        super().__init__(path, (), (Arg('success', bool),))
+
+    def __call__(self) -> Call[bool]:
+        return Call(self, ())
+
+
 class ODrive3_get_interrupt_status(Func[int]):
     def __init__(self, path: str) -> None:
         super().__init__(path, (Arg('irqn', int),), (Arg('status', int),))
@@ -147,6 +155,7 @@ class ODrive3:
         self.erase_configuration = ODrive3_erase_configuration(p + "erase_configuration")
         self.reboot = ODrive3_reboot(p + "reboot")
         self.enter_dfu_mode = ODrive3_enter_dfu_mode(p + "enter_dfu_mode")
+        self.enter_can_bootloader = ODrive3_enter_can_bootloader(p + "enter_can_bootloader")
         self.get_interrupt_status = ODrive3_get_interrupt_status(p + "get_interrupt_status")
         self.get_dma_status = ODrive3_get_dma_status(p + "get_dma_status")
         self.get_gpio_states = ODrive3_get_gpio_states(p + "get_gpio_states")

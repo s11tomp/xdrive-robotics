@@ -44,6 +44,7 @@ This file is generated from `src/odrive-interface.yaml` by `tools/gen_reference.
 | `erase_configuration()` | Resets all `config` variables to their default values and reboots the controller |
 | `reboot()` | Reboots the controller without saving the current configuraiton |
 | `enter_dfu_mode()` | Enters the Device Firmware Update mode |
+| `enter_can_bootloader()` -> bool (added) | Resets into the CAN bootloader (flash sectors 0-1), which then waits for a firmware update over CAN at this board's node ID and bit rate (`tools/can_flash.py`). Returns false without resetting while the motor is armed, or when the board has no CAN bootloader. |
 | `get_interrupt_status(irqn: int32)` -> uint32 | Returns information about the specified interrupt number. |
 | `get_dma_status(stream_num: uint8)` -> uint32 | Returns information about the specified DMA stream. |
 | `get_gpio_states()` -> uint32 | Returns the logic states of all GPIOs. Bit i represents the state of GPIOi. |

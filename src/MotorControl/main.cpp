@@ -1,6 +1,8 @@
 
 #define __MAIN_CPP__
 #include "odrive_main.h"
+#include "bootloader/boot_protocol.hpp"
+#include "bootloader/handoff.h"
 #include "nvm_config.hpp"
 
 #include "usart.h"
@@ -23,6 +25,11 @@ __attribute__((section(".ccmram")))
 uint8_t ucHeap[configTOTAL_HEAP_SIZE];
 
 uint32_t _reboot_cookie __attribute__ ((section (".noinit")));
+
+// The image header the CAN bootloader checks before starting this firmware (bootloader/boot_protocol.hpp).
+// The build's sealing step (tools/seal_image.py) writes the length, the CRC and the version into it.
+__attribute__((section(".app_header"), used)) const boot_protocol::ImageHeader app_header = {
+    boot_protocol::IMAGE_MAGIC, boot_protocol::HEADER_VERSION, 0, 0, boot_protocol::HW_XDRIVE_MINI, {0, 0, 0, 0}, {0, 0}};
 // Survives the reset that ends save_configuration(): kSaveFailed when the store failed.
 static uint32_t _save_result __attribute__ ((section (".noinit")));
 static constexpr uint32_t kSaveFailed = 0x5AFEFA11;
@@ -217,6 +224,23 @@ void ODrive::enter_dfu_mode() {
         //_reboot_cookie = 0xDEADFE75;
         //NVIC_SystemReset();
     }
+}
+
+bool ODrive::enter_can_bootloader() {
+    bool any_armed = std::any_of(axes.begin(), axes.end(), [](auto& axis){ return axis.motor_.is_armed_; });
+    uint32_t marker = *reinterpret_cast<const uint32_t*>(boot_protocol::BOOT_START + boot_protocol::HEADER_OFFSET);
+    if (any_armed || marker != boot_protocol::BOOTLOADER_MAGIC) {
+        return false;
+    }
+    // Interrupts off first: the handoff sits in the main (interrupt) stack's region.
+    __asm volatile ("CPSID I\n\t":::"memory");
+    BootHandoff* h = reinterpret_cast<BootHandoff*>(BOOT_HANDOFF_ADDR);
+    h->magic = BOOT_HANDOFF_MAGIC;
+    h->node_id = axes[0].config_.can.node_id;
+    h->baud_rate = can_.config_.baud_rate;
+    h->check = boot_handoff_check(h);
+    NVIC_SystemReset();
+    return false;
 }
 
 bool ODrive::any_error() {

@@ -44,7 +44,7 @@ MEMORY
 {
 RAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
 CCMRAM (rw)      : ORIGIN = 0x10000000, LENGTH = 64K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 768K
+FLASH (rx)      : ORIGIN = 0x8008000, LENGTH = 736K  /* behind the CAN bootloader (sectors 0-1) */
 NVM (r)         : ORIGIN = 0x80C0000, LENGTH = 256K
 }
 
@@ -56,6 +56,8 @@ SECTIONS
   {
     . = ALIGN(4);
     KEEP(*(.isr_vector)) /* Startup code */
+    . = 0x200;           /* the image header at APP_START + 0x200 (bootloader/boot_protocol.hpp) */
+    KEEP(*(.app_header))
     . = ALIGN(4);
   } >FLASH
 

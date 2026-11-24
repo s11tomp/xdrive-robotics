@@ -42,6 +42,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 | [Migrating from Makerbase's firmware](docs/migrating-from-stock.md) | What changes from the stock v0.5.1, and carrying settings over |
 | [Control](docs/control.md) | Control modes, input modes, impedance control, tuning |
 | [CAN](docs/can.md) | Wiring and termination, the message table, the impedance command, endpoint access |
+| [CAN bootloader](docs/bootloader.md) | Firmware updates over CAN, the flash layout, moving a board onto the bootloader |
 | [Safety and regen](docs/safety-and-regen.md) | Faults, the watchdog hold, braking energy, ground loops |
 | [Encoders](docs/encoders.md) | The onboard AS5047, frame checks, the correction table |
 | [Hardware](docs/hardware.md) | Connectors, header pinouts, GPIOs, sensing, timing |
@@ -110,6 +111,7 @@ Each tool's docstring gives its usage. "Motor moves" means the tool drives the m
 | `calibrate.py` | Motor moves. Motor, encoder offset and correction-table calibration, one state at a time |
 | `reboot_watch.py` | Motor moves. Reboots and prints the startup state transitions and errors |
 | `usb_flash.py`, `swd_flash.py` | Motor moves (reboot). Flash over USB DFU or SWD, with a whole-flash backup and read-back checks |
+| `can_flash.py` | Motor goes limp, then the startup runs. Update the firmware over CAN through the [CAN bootloader](docs/bootloader.md) |
 | `swd_backup.py` | Read-only whole-flash backup over SWD |
 | `correction_table.py` | Reads, saves, restores or smooths the encoder correction table |
 | `capture.py` | Records up to 8 properties at 8 kHz with the firmware's capture |

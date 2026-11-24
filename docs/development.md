@@ -44,7 +44,8 @@ The build looks for it in `~/.local/arm/gcc-arm-none-eabi-10.3-2021.10/bin/`. Ov
 
 ## Build
 ```sh
-make -j8          # -> build/firmware.{elf,hex,bin,map}
+make -j8          # -> build/firmware.{elf,hex,bin,map} (sealed for the CAN bootloader), build/bootloader.{elf,bin,hex},
+                  #    build/firmware-with-bootloader.bin
 make asm          # disassembly -> build/firmware.asm
 make clean        # removes build/
 ```
@@ -93,13 +94,14 @@ The `.bin` and `.hex` are then identical to the build outputs in Makerbase's sou
 `tools/usb_flash.py` (USB DFU) and `tools/swd_flash.py` (ST-Link and OpenOCD) share the same checks:
 - **Before writing:** the axis goes IDLE, and the whole flash is read twice (the reads must match) and saved under `backups/`, reusing an identical existing backup. `swd_flash.py` also checks that the SWD and USB serials match.
 - **Write:** erases only the sectors the image covers. The config lives in sectors 10–11, so it stays.
+- **Bootloader check:** firmware linked behind the [CAN bootloader](bootloader.md) (at 0x08008000) is refused on a board without the bootloader in sectors 0–1; an image linked at 0x08000000 replaces the bootloader, with a note.
 - **Read-back:** the whole flash is read and checked: the image must match, and sectors outside the erased ones must be unchanged. `usb_flash.py` stays in the bootloader on a mismatch and prints the restore command.
 - **Afterwards:** Motor moves: the board reboots and its startup sequence runs.
 - **SWD wiring:** J2 GND/SWCLK/SWDIO, plus NRST (J2 pin 5) to the ST-Link's RST, so a crashed build can still be reached with connect-under-reset.
 - **Never written:** the option bytes (read and write protection).
 
 ## Releasing
-Pushing a tag `fw-vX.Y.Z` releases X.Y.Z: CI (`.github/workflows/build.yml`) checks that `CHANGELOG.md` has a dated section for X.Y.Z, builds, checks that the firmware reports exactly X.Y.Z (`fw_version_unreleased = 0`), and publishes a GitHub release named "xdrive-robotics X.Y.Z" with `xdrive-robotics-X.Y.Z.{elf,bin,hex}`, `SHA256SUMS` and the changelog section as its notes. A failed check publishes nothing.
+Pushing a tag `fw-vX.Y.Z` releases X.Y.Z: CI (`.github/workflows/build.yml`) checks that `CHANGELOG.md` has a dated section for X.Y.Z, builds, checks that the firmware reports exactly X.Y.Z (`fw_version_unreleased = 0`), and publishes a GitHub release named "xdrive-robotics X.Y.Z" with `xdrive-robotics-X.Y.Z.{elf,bin,hex}`, `xdrive-robotics-X.Y.Z-bootloader.elf`, `xdrive-robotics-X.Y.Z-with-bootloader.bin` (the first flash of a board), `SHA256SUMS` and the changelog section as its notes. A failed check publishes nothing.
 1. In `CHANGELOG.md`, change the section's heading from `Unreleased` to the release date: `## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`.
 2. `python tools/release_notes.py X.Y.Z` (prints the release notes, or what is missing).
 3. Commit and push `main`.

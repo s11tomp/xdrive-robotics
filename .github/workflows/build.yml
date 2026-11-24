@@ -44,6 +44,8 @@ jobs:
             build/firmware.elf
             build/firmware.bin
             build/firmware.hex
+            build/bootloader.elf
+            build/firmware-with-bootloader.bin
 
   release:
     if: startsWith(github.ref, 'refs/tags/fw-v')
@@ -65,6 +67,8 @@ jobs:
           python3 tools/release_notes.py "$v" > notes.md
           cd dist
           for ext in elf bin hex; do mv "firmware.$ext" "xdrive-robotics-$v.$ext"; done
+          mv bootloader.elf "xdrive-robotics-$v-bootloader.elf"
+          mv firmware-with-bootloader.bin "xdrive-robotics-$v-with-bootloader.bin"
           sha256sum xdrive-robotics-"$v".* > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" xdrive-robotics-"$v".* SHA256SUMS \
             --title "xdrive-robotics $v" --notes-file ../notes.md

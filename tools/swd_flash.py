@@ -35,6 +35,7 @@ import tempfile
 import time
 
 from swd_backup import FLASH_BASE, NVM_START, probe, openocd as openocd_readonly
+from xdrive.boot_frame import APP_START, BOOTLOADER_MAGIC, HEADER_OFFSET
 
 WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
 LOGS = WORKDIR / "logs"
@@ -89,6 +90,27 @@ def full_dump(tag):
         if len(data) != 0x100000 or data != b.read_bytes():
             raise SystemExit("FAIL: two flash reads differ (or are short). Check the SWD wiring.")
     return data, stamp
+
+
+def bootloader_check(segs: list[tuple[int, bytes]], flash: bytes) -> tuple[str | None, str | None]:
+    """(refusal, note) for writing `segs` over a chip holding `flash` (from 0x08000000).
+
+    An image linked behind the CAN bootloader (starting at APP_START) needs the bootloader in sectors 0-1:
+    without its marker there, the chip would start from the old image's remains, so the write is refused.
+    An image that covers 0x08000000 replaces whatever is there; replacing a bootloader gets a note."""
+    marker = struct.pack("<I", BOOTLOADER_MAGIC)
+    has_bootloader = flash[HEADER_OFFSET:HEADER_OFFSET + 4] == marker
+    if segs[0][0] >= APP_START:
+        if not has_bootloader:
+            return (f"the image is linked behind the CAN bootloader (0x{APP_START:08X}) and this board has no "
+                    "bootloader in sectors 0-1: flash build/firmware-with-bootloader.bin with --bin first"), None
+        return None, None
+    writes_marker = any(a <= FLASH_BASE + HEADER_OFFSET and FLASH_BASE + HEADER_OFFSET + 4 <= a + len(d)
+                        and d[FLASH_BASE + HEADER_OFFSET - a:FLASH_BASE + HEADER_OFFSET - a + 4] == marker
+                        for a, d in segs)
+    if has_bootloader and not writes_marker:
+        return None, "NOTE: the image starts at 0x08000000 and replaces the CAN bootloader; the board then runs it directly."
+    return None, None
 
 
 def compare(segs, flash):
@@ -197,6 +219,14 @@ def main():
     outdir = save_backup(pre, info["serial"], stamp, f"before flashing {path}")
 
     # 4. Compare.
+    refusal, note = bootloader_check(segs, pre)
+    if note:
+        print(note)
+    if refusal:
+        print(f"REFUSED: {refusal}. Nothing written.")
+        log({"t": datetime.datetime.now().astimezone().isoformat(), "action": "swd_flash_refused", "image": str(path),
+             "serial": info["serial"], "reason": refusal})
+        return 5
     before = compare(segs, pre)
     print(f"Image vs chip now: {before} of {total} bytes differ" + ("  (the chip already holds this image)" if before == 0 else ""))
     record = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "swd_flash" if args.write else "swd_flash_dry_run",

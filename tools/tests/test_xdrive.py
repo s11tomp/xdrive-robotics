@@ -103,6 +103,7 @@ class FakeLink:
         self.json_reads = 0
         self.armed = False
         self.save_fails = False  # the next save_configuration fails to store
+        self.in_bootloader = False  # after enter_can_bootloader(), until a fake bootloader starts the application
         self.rebooting = False
         self.saving = False
         self.uptime = 5000
@@ -147,6 +148,12 @@ class FakeLink:
         elif name == "reboot":
             self.rebooting = True
             raise LinkLost("fake: rebooted")
+        elif name == "enter_can_bootloader":
+            if self.armed:
+                self.values[fn.outputs[0][1].id] = struct.pack("<?", False)
+                return
+            self.in_bootloader = True
+            raise LinkLost("fake: reset into the CAN bootloader")
 
     def read_buffer(self, endpoint_id: int, offset: int) -> bytes:
         assert endpoint_id == JSON_ENDPOINT

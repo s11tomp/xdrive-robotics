@@ -29,7 +29,8 @@ CFLAGS := '-D__weak=__attribute__((weak))' '-D__packed=__attribute__((__packed__
           -fdata-sections -ffunction-sections -g -DFIBRE_ENABLE_SERVER -Wno-nonnull -O2 \
           $(PKG_FLAGS) -I$(BUILD)
 LDFLAGS := -flto -lc -lm -lnosys -mthumb -mfloat-abi=hard -specs=nosys.specs -u _printf_float -u _scanf_float \
-           -Wl,--cref -Wl,--gc-sections -Wl,--undefined=uxTopUsedPriority $(PKG_LDFLAGS)
+           -Wl,--cref -Wl,--gc-sections -Wl,--undefined=uxTopUsedPriority $(PKG_LDFLAGS) \
+           -Wl,-z,max-page-size=0x4000  # else the ELF headers load at 0x08000000, over the bootloader
 DEPFLAGS = -MMD -MP
 
 # version.c is generated, so it is compiled from $(AUTOGEN); it links last, as in Tupfile.lua.
@@ -44,16 +45,43 @@ GENERATOR    := ../tools/codegen/interface_generator.py
 GEN_DEPS     := odrive-interface.yaml $(wildcard ../tools/codegen/*.py)
 
 .PHONY: all clean size asm FORCE
-all: $(BUILD)/firmware.hex $(BUILD)/firmware.bin size
+all: $(BUILD)/firmware.hex $(BUILD)/firmware.bin $(BUILD)/bootloader.hex $(BUILD)/bootloader.bin \
+     $(BUILD)/firmware-with-bootloader.bin size
 
-$(ELF): $(OBJS) Board/v3/STM32F405RGTx_FLASH.ld
-	$(LINKER) $(OBJS) $(CFLAGS) $(LDFLAGS) -Wl,-Map=$(BUILD)/firmware.map -o $@
+# The CAN bootloader (flash sectors 0-1): one freestanding source, no HAL, no libc, CCM RAM only.
+BOOT_ELF    := $(BUILD)/bootloader.elf
+BOOT_CFLAGS := -std=c++17 -mcpu=cortex-m4 -mthumb -mfloat-abi=soft -Os -g -Wall -Wextra -Werror -ffreestanding \
+               -fno-exceptions -fno-rtti -fno-threadsafe-statics -fno-use-cxa-atexit -ffunction-sections -fdata-sections \
+               -DSTM32F405xx -I. -IThirdParty/CMSIS/Include -IThirdParty/CMSIS/Device/ST/STM32F4xx/Include
 
-$(BUILD)/firmware.hex: $(ELF)
+$(BOOT_ELF): bootloader/main.cpp bootloader/boot_protocol.hpp bootloader/handoff.h bootloader/bootloader.ld
+	@mkdir -p $(BUILD)
+	$(PREFIX)g++ $(BOOT_CFLAGS) bootloader/main.cpp -nostdlib -Wl,--gc-sections -Tbootloader/bootloader.ld \
+		-Wl,-Map=$(BUILD)/bootloader.map -lgcc -o $@
+	@$(SIZE) $@
+
+$(BUILD)/bootloader.hex: $(BOOT_ELF)
 	$(OBJCOPY) -O ihex $< $@
 
-$(BUILD)/firmware.bin: $(ELF)
-	$(OBJCOPY) -O binary -S $< $@
+$(BUILD)/bootloader.bin: $(BOOT_ELF)
+	$(OBJCOPY) -O binary --gap-fill 0xFF -j .isr_vector -j .text $< $@
+
+# Linked behind the CAN bootloader (0x08008000), then sealed: tools/seal_image.py writes the image
+# length, CRC and version into its header and writes the .bin and .hex from the same bytes (objcopy's
+# would differ in the padding between sections, which the CRC covers).
+$(ELF): $(OBJS) Board/v3/STM32F405RGTx_FLASH.ld ../tools/seal_image.py Makefile
+	$(LINKER) $(OBJS) $(CFLAGS) $(LDFLAGS) -Wl,-Map=$(BUILD)/firmware.map -o $@
+	$(PYTHON) -B ../tools/seal_image.py $@ --version-c $(AUTOGEN)/version.c --bin $(BUILD)/firmware.bin \
+		--hex $(BUILD)/firmware.hex
+
+$(BUILD)/firmware.hex $(BUILD)/firmware.bin: $(ELF)
+	@test -f $@
+
+# Bootloader and firmware as one image from 0x08000000, for the one-time changeover over USB:
+# usb_flash.py --bin build/firmware-with-bootloader.bin
+$(BUILD)/firmware-with-bootloader.bin: $(BUILD)/bootloader.bin $(BUILD)/firmware.bin
+	$(PYTHON) -B -c "import sys; b, a = (open(p, 'rb').read() for p in sys.argv[1:3]); assert len(b) <= 0x8000; \
+		open(sys.argv[3], 'wb').write(b.ljust(0x8000, b'\xff') + a)" $^ $@
 
 size: $(ELF)
 	@$(SIZE) $<

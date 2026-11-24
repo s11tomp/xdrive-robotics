@@ -47,9 +47,13 @@ The tools write logs to `logs/` and flash backups to `backups/` under the workin
 
 A Mini from Makerbase runs their build of ODrive v0.5.1. Read [Migrating from Makerbase's firmware](migrating-from-stock.md) first: flashing resets the board's config, and the first backup is the only way back.
 
-1. Download `xdrive-robotics-X.Y.Z.elf` from the releases page, or build it (`make`, see `docs/development.md`).
-2. Motor moves (the dry run ends with a reboot): `python tools/usb_flash.py --elf xdrive-robotics-X.Y.Z.elf`. It enters the STM32's DFU bootloader, backs up the whole flash to `backups/`, compares and reboots without writing.
-3. Motor moves (reboot): `python tools/usb_flash.py --elf xdrive-robotics-X.Y.Z.elf --write`.
+The firmware runs behind its own [CAN bootloader](bootloader.md), so the first flash writes both: `xdrive-robotics-X.Y.Z-with-bootloader.bin`, the bootloader and the firmware from 0x08000000.
+
+1. Download `xdrive-robotics-X.Y.Z-with-bootloader.bin` from the releases page, or build it (`make` writes `build/firmware-with-bootloader.bin`, see `docs/development.md`).
+2. Motor moves (the dry run ends with a reboot): `python tools/usb_flash.py --bin xdrive-robotics-X.Y.Z-with-bootloader.bin`. It enters the STM32's DFU bootloader, backs up the whole flash to `backups/`, compares and reboots without writing.
+3. Motor moves (reboot): `python tools/usb_flash.py --bin xdrive-robotics-X.Y.Z-with-bootloader.bin --write`.
+
+Later updates write only the firmware: `usb_flash.py --elf xdrive-robotics-X.Y.Z.elf`, or over CAN with `can_flash.py` ([CAN bootloader](bootloader.md)).
 
 Don't use `odrivetool dfu`: it fetches ODrive's own v3.6 firmware, which doesn't drive the Mini (it retries the missing second gate driver forever), and its DFU client is broken on Python 3.9 and later.
 

@@ -231,6 +231,12 @@ interfaces:
         doc: Reboots the controller without saving the current configuraiton
       enter_dfu_mode:
         doc:  Enters the Device Firmware Update mode
+      enter_can_bootloader:
+        out: {success: bool}
+        doc: |
+          Resets into the CAN bootloader (flash sectors 0-1), which then waits for a firmware update
+          over CAN at this board's node ID and bit rate (`tools/can_flash.py`). Returns false
+          without resetting while the motor is armed, or when the board has no CAN bootloader.
       get_interrupt_status:
         in: {irqn: {type: int32, doc: '-12...-1: processor interrupts, 0...239: NVIC interrupts'}}
         out:

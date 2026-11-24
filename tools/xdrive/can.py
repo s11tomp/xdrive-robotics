@@ -29,6 +29,7 @@ Frames: docs/can.md.
 """
 from __future__ import annotations
 
+import queue
 import struct
 import threading
 import time
@@ -105,6 +106,7 @@ class Bus:
         self._heartbeats: dict[int, tuple[bytes, float]] = {}
         self._awaiting: set[int] = set()                # nodes whose impedance reply the current cycle waits for
         self._impedance_replies: dict[int, bytes] = {}
+        self._extended: queue.Queue[tuple[int, bytes]] = queue.Queue(maxsize=4096)  # 29-bit frames (the CAN bootloader's)
         self._error: BaseException | None = None
         self._stop = threading.Event()
         self._reader = threading.Thread(target=self._read, name="xdrive-can-reader", daemon=True)
@@ -129,7 +131,15 @@ class Bus:
                 self._route(msg)
 
     def _route(self, msg: can.Message) -> None:
-        if msg.is_extended_id or msg.is_remote_frame or msg.is_error_frame or not msg.is_rx or msg.dlc != 8:
+        if msg.is_remote_frame or msg.is_error_frame or not msg.is_rx:
+            return
+        if msg.is_extended_id:
+            try:
+                self._extended.put_nowait((msg.arbitration_id, bytes(msg.data)))
+            except queue.Full:  # nobody reads them: the oldest stay, the newest are dropped
+                pass
+            return
+        if msg.dlc != 8:
             return
         node, cmd, data = msg.arbitration_id >> 5, msg.arbitration_id & 0x1F, bytes(msg.data)
         with self._cond:
@@ -154,17 +164,35 @@ class Bus:
         if self._stop.is_set():
             raise LinkLost("CAN: the bus is closed")
 
-    def _send(self, arb_id: int, data: bytes, timeout: float) -> None:
+    def _send(self, arb_id: int, data: bytes, timeout: float, extended: bool = False) -> None:
         try:
             with self._send_lock:
-                self._bus.send(can.Message(arbitration_id=arb_id, is_extended_id=False, data=data), timeout=timeout)
+                self._bus.send(can.Message(arbitration_id=arb_id, is_extended_id=extended, data=data), timeout=timeout)
         except can.CanError as ex:
             raise LinkError(f"CAN: can't send to ID 0x{arb_id:03x}: {ex}") from ex
 
-    def send_raw(self, arb_id: int, data: bytes) -> None:
-        """Sends one standard-ID frame as given, awaiting nothing: traffic for bus-load tests. Handing
-        it to the adapter may take up to the bus's timeout."""
-        self._send(arb_id, data, self.timeout)
+    def send_raw(self, arb_id: int, data: bytes, extended: bool = False) -> None:
+        """Sends one frame as given (a 29-bit ID with `extended`), awaiting nothing: traffic for bus-load
+        tests, and the CAN bootloader's requests. Handing it to the adapter may take up to the bus's timeout."""
+        self._check()
+        self._send(arb_id, data, self.timeout, extended)
+
+    def recv_extended(self, timeout: float) -> tuple[int, bytes] | None:
+        """The next received 29-bit frame (ID, data), oldest first, or None after `timeout`."""
+        self._check()
+        try:
+            return self._extended.get(timeout=timeout)
+        except queue.Empty:
+            self._check()
+            return None
+
+    def drain_extended(self) -> None:
+        """Drops every 29-bit frame received so far."""
+        while True:
+            try:
+                self._extended.get_nowait()
+            except queue.Empty:
+                return
 
     def endpoint_request(self, node: int, frame: bytes, timeout: float) -> ep.Reply:
         """Sends one endpoint-access request and returns its reply; LinkTimeout if none comes in time."""

@@ -38,7 +38,8 @@ from xdrive.enums import AxisState
 from xdrive.errors import LinkError, LinkLost, LinkTimeout
 from xdrive.props import odrv
 from swd_backup import FLASH_BASE, NVM_START
-from swd_flash import WORKDIR, SECTORS, compare, load_segments, log, readback_check, save_backup, sectors_touched
+from swd_flash import (WORKDIR, SECTORS, bootloader_check, compare, load_segments, log, readback_check, save_backup,
+                       sectors_touched)
 
 VID, PID = 0x0483, 0xDF11  # STM32 system bootloader in DFU mode
 FLASH_SIZE = 0x100000
@@ -253,12 +254,18 @@ def main():
     record.update(pre_flash_backup=str(outdir.relative_to(WORKDIR)), pre_sha256=hashlib.sha256(pre).hexdigest())
 
     # 3. Compare.
+    refusal, note = bootloader_check(segs, pre)
+    if note:
+        print(note)
+    if refusal:
+        print(f"REFUSED: {refusal}. Nothing written.")
+        record["refused"] = refusal
     before = compare(segs, pre)
     record["bytes_differing_before"] = before
     print(f"Image vs chip now: {before} of {total} bytes differ" + ("  (the chip already holds this image)" if before == 0 else ""))
 
     # 4. Program and check.
-    if args.write:
+    if args.write and not refusal:
         t1 = time.monotonic()
         for addr, size in touched:
             print(f"  erase sector {SECTORS.index((addr, size))} (0x{addr:08X}, {size // 1024} KiB)")
@@ -291,13 +298,16 @@ def main():
     record["total_s"] = round(time.monotonic() - t0, 1)
     errors = [k for k in ("odrv_error", "axis_error", "motor_error", "encoder_error") if record.get(k)]
     ok = record["back_on_usb"] and not errors
-    record["result"] = "OK" if ok else "BOARD NOT BACK CLEANLY"
+    record["result"] = "REFUSED" if refusal else "OK" if ok else "BOARD NOT BACK CLEANLY"
     log(record)
     if record["back_on_usb"]:
         print(f"  back on USB: fw {record['fw_version']}, axis0 state {record['axis_state']}, "
               f"errors {({k: record[k] for k in errors}) or 'none'}; {record['total_s']} s in all")
     else:
         print("  the board didn't come back on USB within 15 s")
+    if refusal:
+        print(f"RESULT: REFUSED, nothing written ({refusal})")
+        return 5
     print("RESULT: OK" if ok else "RESULT: check the board (dump_board.py) before driving the motor.")
     return 0 if ok else 5
 

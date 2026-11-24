@@ -171,6 +171,12 @@ interfaces:
               rx_cnt: readonly uint32
               error_cnt: readonly uint32
       user_config_loaded: readonly uint32
+      config_save_failed:
+        type: readonly bool
+        doc: |
+          True when the `save_configuration()` call that caused this boot failed
+          to store the config. The board reboots after every save, so after a
+          failed one it runs on the config saved before. Any other boot clears it.
       misconfigured:
         # TODO: make this a system error
         type: readonly bool
@@ -212,7 +218,13 @@ interfaces:
         in: {gpio: uint32}
         out: {voltage: float32}
         doc: Reads the ADC voltage of the specified GPIO. The GPIO should be in `GPIO_MODE_ANALOG_IN`.}
-      save_configuration: {out: {success: bool}, doc: Saves the current configuration to non-volatile memory and reboots the board.}
+      save_configuration:
+        out: {success: bool}
+        doc: |
+          Saves the current configuration to non-volatile memory and reboots the
+          board, whether or not the store succeeded: check `config_save_failed`
+          once it is back up. Returns false without saving or rebooting while the
+          motor is armed.
       erase_configuration:
         doc: Resets all `config` variables to their default values and reboots the controller
       reboot:

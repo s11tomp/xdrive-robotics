@@ -23,6 +23,9 @@ __attribute__((section(".ccmram")))
 uint8_t ucHeap[configTOTAL_HEAP_SIZE];
 
 uint32_t _reboot_cookie __attribute__ ((section (".noinit")));
+// Survives the reset that ends save_configuration(): kSaveFailed when the store failed.
+static uint32_t _save_result __attribute__ ((section (".noinit")));
+static constexpr uint32_t kSaveFailed = 0x5AFEFA11;
 extern char _estack; // provided by the linker script
 
 
@@ -176,6 +179,11 @@ bool ODrive::save_configuration(void) {
         // because the CPU gets halted during a flash erase. Missing events
         // (encoder updates, step/dir steps) is not good so to be sure we just
         // reboot.
+        // The reboot also follows a failed store: it leaves config_manager in its
+        // failed state and the NVM index past any partly written fields, which
+        // only the boot-time scan resolves. The result reaches the next boot
+        // through _save_result (config_save_failed).
+        _save_result = success ? 0 : kSaveFailed;
         NVIC_SystemReset();
     }
 
@@ -662,6 +670,8 @@ extern "C" int main(void) {
             && config_read_all()
             && config_manager.finish_load(&config_size)
             && config_apply_all();
+    odrv.config_save_failed_ = (_save_result == kSaveFailed);
+    _save_result = 0;
     if (success) {
         odrv.user_config_loaded_ = config_size;
     } else {

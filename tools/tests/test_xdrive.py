@@ -102,7 +102,9 @@ class FakeLink:
         self.functions = {fn.id: name for name, fn in self.itf.functions.items()}
         self.json_reads = 0
         self.armed = False
+        self.save_fails = False  # the next save_configuration fails to store
         self.rebooting = False
+        self.saving = False
         self.uptime = 5000
         self.put("system_stats.uptime", self.uptime)
 
@@ -140,7 +142,7 @@ class FakeLink:
             if self.armed:
                 self.values[fn.outputs[0][1].id] = struct.pack("<?", False)
                 return
-            self.rebooting = True
+            self.rebooting = self.saving = True
             raise LinkLost("fake: rebooted")
         elif name == "reboot":
             self.rebooting = True
@@ -156,7 +158,8 @@ class FakeLink:
 
     def reconnect(self, timeout: float) -> None:
         if self.rebooting:
-            self.rebooting = False
+            self.put("config_save_failed", self.saving and self.save_fails)
+            self.rebooting = self.saving = False
             self.put("system_stats.uptime", 120)
 
     def close(self) -> None:
@@ -239,6 +242,11 @@ def test_save_lifecycle(json_bytes: bytes) -> None:
         board.save()
     link.armed = False
     board.save()                          # the board reboots: the call raises LinkLost, then reconnects
+    assert board.get(odrv.system_stats.uptime) == 120
+    link.save_fails = True
+    link.put("system_stats.uptime", 5000)
+    with pytest.raises(Refused, match="did not store"):
+        board.save()                      # it reboots, then reports the failed store
     assert board.get(odrv.system_stats.uptime) == 120
     link.put("system_stats.uptime", 5000)
     board.reboot()
@@ -661,6 +669,11 @@ def test_can_cycle_lifecycle(can_bus: xcan.Bus, fakes: list[FakeCanBoard], cache
     fakes[0].link.armed = False
     j1.save()                              # no reply, the node goes silent, then answers with a reset uptime
     assert j1.get(odrv.system_stats.uptime) == 120
+    fakes[0].link.save_fails = True
+    fakes[0].link.put("system_stats.uptime", 5000)
+    with pytest.raises(Refused, match="did not store"):
+        j1.save()
+    fakes[0].link.save_fails = False
     reply = can_bus.cycle({1: xcan.Impedance(pos=1.0)}, timeout=0.5)[1]
     assert reply is not None and abs(reply.pos - 1.0) < 0.0002
     j2.close()

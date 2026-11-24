@@ -32,7 +32,7 @@ import sys
 
 from xdrive import paths, usb
 from xdrive.enums import AxisState
-from xdrive.errors import LinkError
+from xdrive.errors import LinkError, Refused
 from xdrive.model import RwProp
 from xdrive.props import odrv
 
@@ -151,9 +151,13 @@ def main():
         if all(c["ok"] for c in changes):
             print("save_configuration(): the board saves and REBOOTS; its startup sequence runs "
                   "(with startup calibration enabled, the motor moves).")
-            b.save()
-            saved = True
-            print("saved; the board is back up.")
+            try:
+                b.save()
+            except Refused as ex:
+                print(f"!!! NOT SAVED: {ex}")
+            else:
+                saved = True
+                print("saved; the board is back up.")
         else:
             print("Not saving: a readback mismatched.")
     b.close()

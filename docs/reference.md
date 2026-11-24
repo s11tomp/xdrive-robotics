@@ -29,6 +29,7 @@ This file is generated from `src/odrive-interface.yaml` by `tools/gen_reference.
 | `n_evt_control_loop` | uint32 |  | ro | Number of control loop iterations since startup (modulo 2^32) |
 | `task_timers_armed` | bool |  | rw | Set by a profiling application to trigger sampling of a single control iteration. Cleared by the device as soon as the sampling is complete. |
 | `user_config_loaded` | uint32 |  | ro |  |
+| `config_save_failed` (added) | bool |  | ro | True when the `save_configuration()` call that caused this boot failed to store the config. The board reboots after every save, so after a failed one it runs on the config saved before. Any other boot clears it. |
 | `misconfigured` | bool |  | ro | If this property is true, something is bad in the configuration. The ODrive can still be used in this state but the user should investigate which setting is problematic. This variable does not cover all misconfigurations.<br>Possible causes: - A GPIO was set to a mode that it doesn't support - A GPIO was set to a mode for which the corresponding feature was not enabled. Example: `GPIO_MODE_UART_A` was used without enabling `config.enable_uart_a`. - A feature was enabled which is not supported on this hardware. Example: `config.enable_uart_c` set to true on ODrive v3.x. - A GPIO was used as an interrupt input for two internal components or two GPIOs that are mutually exclusive in their interrupt capability were both used as interrupt input. Example: `Axis:config.step_gpio_pin` of both axes were set to the same GPIO. |
 | `test_property` | uint32 |  | rw |  |
 | `otp_valid` | bool |  | ro |  |
@@ -39,7 +40,7 @@ This file is generated from `src/odrive-interface.yaml` by `tools/gen_reference.
 | `set_adc1_scan(enable: bool)` (added) | XDRIVE diagnostics (RAM only): stop or restart ADC1's free-running regular scan. The bus-voltage sample (ADC1 injected, timer-triggered) keeps running. While stopped, thermistor and analog-input readings are frozen at their last value. |
 | `test_function(delta: int32)` -> int32 |  |
 | `get_adc_voltage(gpio: uint32)` -> float32 | Reads the ADC voltage of the specified GPIO. The GPIO should be in `GPIO_MODE_ANALOG_IN`.} |
-| `save_configuration()` -> bool | Saves the current configuration to non-volatile memory and reboots the board. |
+| `save_configuration()` -> bool | Saves the current configuration to non-volatile memory and reboots the board, whether or not the store succeeded: check `config_save_failed` once it is back up. Returns false without saving or rebooting while the motor is armed. |
 | `erase_configuration()` | Resets all `config` variables to their default values and reboots the controller |
 | `reboot()` | Reboots the controller without saving the current configuraiton |
 | `enter_dfu_mode()` | Enters the Device Firmware Update mode |

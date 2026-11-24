@@ -192,9 +192,13 @@ class Board:
     def save(self, timeout: float = 15.0) -> None:
         """save_configuration(): the board stores its config and reboots. Returns once it is back up.
 
-        The board saves only while the motor is disarmed; armed, it refuses and stays up.
+        The board saves only while the motor is disarmed; armed, it refuses and stays up. It reboots
+        after a failed store too, running on the config saved before; that raises Refused.
         """
         self._reboot_with(odrv.save_configuration(), timeout)
+        if self.get(odrv.config_save_failed):
+            raise Refused(f"{self.describe()}: save_configuration did not store the config "
+                          "(config_save_failed); the board rebooted with its previously saved config")
 
     def reboot(self, timeout: float = 15.0) -> None:
         """Reboots the board; returns once it is back up."""

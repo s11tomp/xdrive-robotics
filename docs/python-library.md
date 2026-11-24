@@ -65,7 +65,7 @@ All of them are methods of `xdrive.board.Board`. Each `get` and `set` is a trans
 | `set(prop, value)` | Writes a property and returns the value it holds afterwards, read back from the board |
 | `get_many([props])` | Reads the properties one after another; returns a `Reading` with the `values` and the host's `perf_counter()` time before and after the reads (`t_start`, `t_end`) |
 | `call(func(args))` | Writes the function's inputs, runs it, reads its outputs: returns `None`, one value, or a tuple |
-| `save()` | `save_configuration()`: the board stores its config and reboots. Returns once it answers again |
+| `save()` | `save_configuration()`: the board stores its config and reboots. Returns once it answers again; raises `Refused` when the motor is armed (no save, no reboot) or when the store failed (`config_save_failed` after the reboot) |
 | `reboot()` | Reboots the board; returns once it answers again |
 | `close()` | Releases the USB interface, or ends the CAN link (the bus stays open); also on leaving a `with` block |
 

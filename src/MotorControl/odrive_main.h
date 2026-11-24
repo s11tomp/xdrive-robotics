@@ -237,6 +237,7 @@ public:
     BoardConfig_t config_;
     uint32_t user_config_loaded_ = 0;
     bool misconfigured_ = false;
+    bool config_save_failed_ = false;
 
     uint32_t test_property_ = 0;
 

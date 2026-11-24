@@ -53,8 +53,8 @@ class BenchLink(FakeLink):
 
     def reconnect(self, timeout: float) -> None:
         if self.rebooting:
-            self.rebooting = False
             self.boot = time.monotonic()
+        super().reconnect(timeout)
 
 
 @pytest.fixture

@@ -131,6 +131,7 @@ class ODrive3:
         self.task_times = TaskTimes(p + "task_times.")
         self.system_stats = SystemStats(p + "system_stats.")
         self.user_config_loaded: Prop[int] = Prop(p + "user_config_loaded", int)
+        self.config_save_failed: Prop[bool] = Prop(p + "config_save_failed", bool)
         self.misconfigured: Prop[bool] = Prop(p + "misconfigured", bool)
         self.capture = Capture(p + "capture.")
         self.can = Can(p + "can.")

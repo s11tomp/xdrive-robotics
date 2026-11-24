@@ -23,7 +23,8 @@ Every impedance cycle is logged to logs/<stamp>_node<N>_can-<stage>.csv; the che
 numbers go to logs/<stamp>_node<N>_can-test.json. RAM-only settings, restored at the end; ends IDLE.
 Exit code 1 if any check fails.
 
-Before the first run, over USB (the board's defaults are 250 kbit/s and node 0):
+Before the first run, over USB (the board's defaults are 250 kbit/s and node 0; can.config.protocol
+must be 1, CANSimple, the default):
   python tools/set_config.py can.config.baud_rate=1000000 axis0.config.can.node_id=1 --save
 Wiring, termination and ground: docs/can.md.
 
@@ -247,7 +248,8 @@ def test_bus(b, wanted):
         if len(nodes) != 1:
             raise Unexpected(f"heartbeats heard from nodes {nodes}; pass --node" if nodes else
                              "no heartbeat heard: check the bitrate (the board's can.config.baud_rate), "
-                             "wiring, termination and the adapter's ground (docs/can.md)")
+                             "can.config.protocol (1: CANSimple), wiring, termination and the adapter's "
+                             "ground (docs/can.md)")
         b.node = nodes[0]
     b.check("node sends heartbeats", b.node in nodes, f"node {b.node}, heard {nodes}")
     if b.node not in nodes:

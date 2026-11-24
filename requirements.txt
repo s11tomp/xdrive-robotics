@@ -5,10 +5,12 @@ PyYAML==6.0.3
 jsonschema==4.26.0
 cantools==45.2.0
 # Host tools and their tests. pyusb needs libusb (macOS: brew install libusb). python-can is the host
-# library's CAN transport; gs_usb is python-can's driver for candleLight (gs_usb) USB-CAN adapters.
+# library's CAN transport; gs_usb is python-can's driver for candleLight (gs_usb) USB-CAN adapters,
+# pyserial its transport for slcan adapters (a serial port, e.g. CANable firmware).
 numpy==2.4.6
 pyusb==1.3.1
 python-can==4.6.1
 gs_usb==0.3.1
+pyserial==3.5
 pytest==9.2.0
 mypy==2.4.1

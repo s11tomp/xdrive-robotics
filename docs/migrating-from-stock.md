@@ -30,6 +30,8 @@ Flashing resets the board's config: the stored config's layout differs between t
 | `axis0.motor.current_control.Ibus` (read-only) | `axis0.motor.I_bus` |
 | `axis0.motor.gate_driver.drv_fault` (read-only) | `axis0.last_drv_fault` |
 
+One setting keeps its name but changes its values: **`can.config.protocol`** was an enum on v0.5.1, where 0 is CANSimple; here it is a set of flags, where CANSimple is 1 and 0 turns CAN messaging off. A v0.5.1 backup carries 0, so set it to 1 after applying the backup.
+
 Everything under `axis1` is gone (see below). Every other setting this firmware has is listed, with units, in the [property reference](reference.md).
 
 ## Behavior that changes

@@ -21,7 +21,7 @@ Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus tw
 2. `odrv0.axis0.config.can.node_id = <n>`: 0 to 63 with standard IDs, different on every board.
 3. `odrv0.save_configuration()` (the board reboots).
 
-CAN is on by default (`config.enable_can_a`, and GPIO15 and GPIO16 in `GPIO_MODE_CAN_A`). The [property reference](reference.md#odrv0axis0configcan) lists the cyclic message rates and the impedance ranges under `axis0.config.can`.
+CAN is on by default (`config.enable_can_a`, GPIO15 and GPIO16 in `GPIO_MODE_CAN_A`, and `can.config.protocol` = 1, CANSimple). With `can.config.protocol` = 0 the board neither sends nor answers anything on the bus, though its CAN controller runs. A config carried over from stock v0.5.1 has that 0: see [Migrating from stock](migrating-from-stock.md#carrying-settings-over). The [property reference](reference.md#odrv0axis0configcan) lists the cyclic message rates and the impedance ranges under `axis0.config.can`.
 
 ## Frames
 

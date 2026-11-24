@@ -108,7 +108,7 @@
     "axis0.trap_traj.config.accel_limit": 5.0,
     "axis0.trap_traj.config.decel_limit": 5.0,
     "axis0.trap_traj.config.vel_limit": 6.0,
-    "can.config.protocol": 0,
+    "can.config.protocol": 1,
     "config.brake_resistance": 2.0,
     "config.dc_bus_overvoltage_ramp_end": 59.92000198364258,
     "config.dc_bus_overvoltage_ramp_start": 59.92000198364258,

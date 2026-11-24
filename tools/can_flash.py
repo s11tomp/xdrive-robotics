@@ -5,8 +5,8 @@ and back: the motor goes limp during the update, and its startup sequence runs a
   1. The image: a firmware ELF (the build seals build/firmware.elf) or a .bin starting at the application's
      address; its header and CRC must check out, as the bootloader checks them before starting it.
   2. The board:
-       --node N    a board running its application: enter_can_bootloader() over CAN (refused while the
-                   motor is armed, or by a board without the bootloader), then a DISCOVER finds it in the
+       --node N    a board running its application: its axis goes IDLE, then enter_can_bootloader() over
+                   CAN (refused by a board without the bootloader), then a DISCOVER finds it in the
                    bootloader by its node ID
        --serial S  a board already in the bootloader: one whose application can't start, or one held
                    there at power-up by a DISCOVER within its 100 ms window
@@ -14,7 +14,8 @@ and back: the motor goes limp during the update, and its startup sequence runs a
   3. Dry run (no --write): VERIFY reports whether the board's current image is valid, then START_APP.
   4. --write: ERASE, the image in 1 KB blocks (a block the board rejects or doesn't answer is sent again,
      up to RETRIES times), VERIFY, START_APP.
-  5. With a node ID: waits for the board's heartbeat and checks the firmware version it reports.
+  5. With a node ID: waits for the board's startup to end (IDLE or closed loop in its heartbeat) and checks
+     the firmware version it reports.
 Logs to logs/actions.jsonl. Recovery when this fails: the board stays in the bootloader, so run it again
 (with --serial if the application never came back); USB DFU and SWD always work as well.
 
@@ -37,6 +38,7 @@ import can as python_can
 import seal_image
 from xdrive import boot_frame as bf
 from xdrive import can
+from xdrive.enums import AxisState
 from xdrive.errors import InterfaceMismatch, LinkError, LinkLost, LinkTimeout
 from xdrive.props import odrv
 
@@ -47,6 +49,7 @@ ERASE_TIMEOUT = 30.0      # s: erasing all eight application sectors takes up to
 ANSWER_TIMEOUT = 1.0      # s: any other answer
 ENTER_TIMEOUT = 3.0       # s: from enter_can_bootloader() to the board answering DISCOVER
 START_TIMEOUT = 15.0      # s: from START_APP to the application's heartbeat
+FRAME_BITS = 160          # a 29-bit-ID frame with 8 bytes and worst-case stuffing, plus the gap to the next
 
 
 class Failed(Exception):
@@ -102,12 +105,18 @@ def discover(bus: can.Bus, timeout: float = 0.3) -> list[bf.Discovered]:
 
 
 def enter_bootloader(bus: can.Bus, node: int) -> None:
-    """enter_can_bootloader() on the node's application; the board resets before it can answer."""
+    """IDLE, then enter_can_bootloader() on the node's application; the board resets before it can answer."""
     if bus.heartbeat(node) is None and node not in bus.scan(0.3):
         raise Failed(f"no heartbeat from node {node}: is its application running? (a board already in the "
                      "bootloader is found with --serial, or without --node)")
     board = bus.connect(node)
     try:
+        board.set(odrv.axis0.requested_state, AxisState.IDLE)
+        end = time.monotonic() + 2.0
+        while board.get(odrv.axis0.current_state) is not AxisState.IDLE:
+            if time.monotonic() > end:
+                raise Failed(f"node {node}'s axis didn't go IDLE")
+            time.sleep(0.05)
         ok = board.call(odrv.enter_can_bootloader())
     except InterfaceMismatch as ex:
         raise Failed(f"node {node}'s firmware has no enter_can_bootloader(): update it over USB once ({ex})") from None
@@ -116,7 +125,7 @@ def enter_bootloader(bus: can.Bus, node: int) -> None:
     finally:
         board.close()
     if not ok:
-        raise Failed(f"node {node} refused enter_can_bootloader(): its motor is armed, or it has no CAN bootloader")
+        raise Failed(f"node {node} refused enter_can_bootloader(): it has no CAN bootloader, or its motor is armed")
 
 
 def find_board(bus: can.Bus, node: int | None, serial: int | None) -> bf.Discovered:
@@ -139,7 +148,18 @@ def find_board(bus: can.Bus, node: int | None, serial: int | None) -> bf.Discove
     return found[0]
 
 
-def write_image(bus: can.Bus, serial: int, image: bytes, block_size: int, record: dict[str, Any]) -> None:
+def send_paced(bus: can.Bus, frames: list[tuple[int, bytes]], gap: float) -> None:
+    """Sends the frames at most one per `gap` seconds: a USB adapter takes frames faster than the bus carries
+    them and drops what overflows its queue."""
+    t = time.perf_counter()
+    for frame in frames:
+        while time.perf_counter() < t:
+            pass
+        bus.send_raw(*frame, extended=True)
+        t += gap
+
+
+def write_image(bus: can.Bus, serial: int, image: bytes, block_size: int, gap: float, record: dict[str, Any]) -> None:
     s = bf.status(request(bus, serial, bf.erase(serial, len(image)), bf.Cmd.ERASE, ERASE_TIMEOUT))
     if s is not bf.Status.OK:
         raise Failed(f"ERASE: {s.name}")
@@ -150,8 +170,7 @@ def write_image(bus: can.Bus, serial: int, image: bytes, block_size: int, record
         data = padded[off:off + block_size]
         for attempt in range(RETRIES + 1):
             bus.drain_extended()
-            for frame in bf.block(serial, off, data):
-                bus.send_raw(*frame, extended=True)
+            send_paced(bus, bf.block(serial, off, data), gap)
             got = answer(bus, serial, bf.Cmd.BLOCK_END, ANSWER_TIMEOUT)
             result = None if got is None else bf.decode_block_end(got)
             if result == (bf.Status.OK, off):
@@ -216,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
             if d.protocol_version != bf.PROTOCOL_VERSION:
                 raise Failed(f"the bootloader speaks protocol {d.protocol_version}, this tool {bf.PROTOCOL_VERSION}")
             if args.write:
-                write_image(bus, d.serial, image, args.block_size, record)
+                write_image(bus, d.serial, image, args.block_size, FRAME_BITS / args.bitrate, record)
             s, length = bf.decode_verify(request(bus, d.serial, bf.verify(d.serial), bf.Cmd.VERIFY))
             print(f"VERIFY: {s.name}" + (f", {length} bytes" if s is bf.Status.OK else ""))
             if args.write and (s is not bf.Status.OK or length != len(image)):
@@ -231,13 +250,15 @@ def main(argv: list[str] | None = None) -> int:
             if node is not None:
                 end = time.monotonic() + START_TIMEOUT
                 t_start = time.monotonic()
+                settled = (AxisState.IDLE, AxisState.CLOSED_LOOP_CONTROL)
                 while time.monotonic() < end:
                     hb = bus.heartbeat(node)
-                    if hb is not None and hb.t > t_start:
+                    if hb is not None and hb.t > t_start and hb.state in settled:
                         break
                     time.sleep(0.05)
                 else:
-                    raise Failed(f"node {node} sent no heartbeat within {START_TIMEOUT:g} s of START_APP")
+                    raise Failed(f"node {node} didn't end its startup in IDLE or closed loop within "
+                                 f"{START_TIMEOUT:g} s of START_APP")
                 board = bus.connect(node)
                 try:
                     running = (board.get(odrv.fw_version_major), board.get(odrv.fw_version_minor),

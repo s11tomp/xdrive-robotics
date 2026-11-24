@@ -20,6 +20,7 @@ import pytest
 from test_boot_frame import make_image
 from test_xdrive import FakeCanBoard, FakeLink, cache, json_bytes  # noqa: F401  (fixtures)
 from xdrive import boot_frame as bf
+from xdrive.enums import AxisState
 
 import can_flash  # noqa: E402
 
@@ -196,6 +197,7 @@ def app_board(json_bytes: bytes, channel: str, image: tuple[bytes, pathlib.Path]
     h = bf.read_header(img)
     assert h is not None
     app = FakeCanBoard(json_bytes, channel, 3)
+    app.link.put("axis0.current_state", AxisState.IDLE.value)
     for name, value in zip(("major", "minor", "revision", "unreleased"), h.fw_version):
         app.link.put(f"fw_version_{name}", value)
     boot = FakeBootloader(channel, node=3, link=app.link)
@@ -212,9 +214,11 @@ def test_write_by_node(app_board: tuple[FakeCanBoard, FakeBootloader], image: tu
     assert bytes(boot.flash[:len(img)]) == img and boot.started and not app.link.in_bootloader
 
 
-def test_an_armed_node_refuses(app_board: tuple[FakeCanBoard, FakeBootloader], image: tuple[bytes, pathlib.Path],
-                               channel: str, cache: pathlib.Path) -> None:  # noqa: F811
+def test_a_node_that_stays_armed_is_left_alone(app_board: tuple[FakeCanBoard, FakeBootloader],
+                                              image: tuple[bytes, pathlib.Path], channel: str,
+                                              cache: pathlib.Path) -> None:  # noqa: F811
     app, boot = app_board
-    app.link.armed = True
+    app.link.armed = True                                            # the fake ignores the IDLE request
+    app.link.put("axis0.current_state", AxisState.CLOSED_LOOP_CONTROL.value)
     assert run(channel, "--bin", str(image[1]), "--node", "3", "--write") == 2
     assert boot.frames == 0 and not app.link.in_bootloader

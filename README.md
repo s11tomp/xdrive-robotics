@@ -12,7 +12,7 @@ This is an unofficial fork. It is not affiliated with ODrive Robotics or Makerba
 |---|---|---|
 | Board | MKS XDRIVE Mini, reports hw 3.6, 56 V variant, onboard AS5047P | Other single-motor ODrive v3.6 clones (ODESC and others). Not supported: dual-motor boards such as the ODrive v3.6 itself |
 | Motor | DJI 10018 (77 KV, 21 pole pairs) at 24 V, unloaded rotor on a bench stand | Other motors, motors under load |
-| CAN | The impedance and endpoint-access codecs, against the firmware headers on the host | A real bus |
+| CAN | One board on a 1 Mbit/s bus (CANable 2.0 Pro, slcan): impedance command, endpoint access, CAN bootloader | Two or more boards on one bus |
 | Host | macOS, Python 3.11 | Linux, Windows |
 
 ## What it adds to ODrive v0.5.6

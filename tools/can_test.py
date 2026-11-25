@@ -47,7 +47,6 @@ import dataclasses
 import datetime
 import json
 import math
-import pathlib
 import statistics
 import sys
 import time
@@ -57,6 +56,7 @@ import numpy as np
 
 import can as python_can
 
+from logfiles import logs_dir, rel
 from xdrive import can, report
 from xdrive.board import Board
 from xdrive.enums import AxisState, ControlMode, InputMode, WatchdogAction
@@ -67,8 +67,6 @@ from xdrive.props import odrv
 
 import capture
 
-WORKDIR = pathlib.Path.cwd()  # logs/ goes under the working directory
-LOGS = WORKDIR / "logs"
 RUNAWAY = 12.0           # turn/s: IDLE immediately above this
 POS_MARGIN = 5.0         # turn: the impedance stage travels up to 4 turns from where it starts
 MAX_MISSED = 25          # consecutive missed replies before the run aborts
@@ -125,7 +123,7 @@ class Bench:
         print(f"  [{'PASS' if ok else 'FAIL'}] {name}: {detail}")
 
     def log(self, name):
-        path = LOGS / f"{self.stamp}_node{self.node}_can-{name}.csv"
+        path = logs_dir() / f"{self.stamp}_node{self.node}_can-{name}.csv"
         with path.open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(FIELDS)
@@ -534,7 +532,7 @@ def test_current(b):
             done and None not in host and worst is not None and worst < 1e3 / b.rate,
             f"host send -> first reply with half the step: {', '.join('none' if h is None else f'{h:.2f}' for h in host)} ms")
 
-    path = LOGS / f"{b.stamp}_node{b.node}_can-current-capture.csv"
+    path = logs_dir() / f"{b.stamp}_node{b.node}_can-current-capture.csv"
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["step", "t_ms"] + CAPTURE_FIELDS)
@@ -619,13 +617,13 @@ def main(argv: list[str] | None = None) -> int:
                 elif name == "save":
                     test_save(b)
                 elif name == "impedance":
-                    logs.append(str(test_impedance(b).relative_to(WORKDIR)))
+                    logs.append(rel(test_impedance(b)))
                 elif name == "latency":
-                    logs.append(str(test_latency(b).relative_to(WORKDIR)))
+                    logs.append(rel(test_latency(b)))
                 elif name == "current":
-                    logs += [str(p.relative_to(WORKDIR)) for p in test_current(b)]
+                    logs += [rel(p) for p in test_current(b)]
                 elif name == "load":
-                    logs.append(str(test_load(b).relative_to(WORKDIR)))
+                    logs.append(rel(test_load(b)))
         except (Unexpected, XdriveError, KeyboardInterrupt) as ex:
             abort = repr(ex)
             print(f"ABORT: {abort}")
@@ -638,16 +636,16 @@ def main(argv: list[str] | None = None) -> int:
                     for p, value in saved.items():
                         b.board.set(p, value)
                     if b.rows:
-                        logs.append(str(b.log("abort").relative_to(WORKDIR)))
+                        logs.append(rel(b.log("abort")))
                 except (LinkError, XdriveError) as ex:  # the bus or the board gone: the only stop left is the PSU
                     print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
     out = {"t": datetime.datetime.now().astimezone().isoformat(), "node": b.node, "interface": args.interface,
            "bitrate": args.bitrate, "rate_hz": args.rate, "tests": tests, "abort": abort, "checks": b.checks,
            "stats": b.stats, "logs": logs}
-    path = LOGS / f"{stamp}_node{b.node}_can-test.json"
+    path = logs_dir() / f"{stamp}_node{b.node}_can-test.json"
     path.write_text(json.dumps(out, indent=2) + "\n")
     failed = [c for c in b.checks if not c["ok"]]
-    print(f"{len(b.checks) - len(failed)}/{len(b.checks)} checks passed; axis IDLE; settings restored -> {path.relative_to(WORKDIR)}")
+    print(f"{len(b.checks) - len(failed)}/{len(b.checks)} checks passed; axis IDLE; settings restored -> {rel(path)}")
     return 1 if failed or abort else 0
 
 

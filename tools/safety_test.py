@@ -22,17 +22,15 @@ import csv
 import datetime
 import json
 import math
-import pathlib
 import sys
 import time
 
+from logfiles import logs_dir, rel
 from move_test import FIELDS as MOVE_FIELDS
 from xdrive import paths, report, usb
 from xdrive.enums import AxisError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 FIELDS = MOVE_FIELDS + ["axis0.controller.timeout_active", "axis0.controller.torque_setpoint"]
 IX = {f: i for i, f in enumerate(FIELDS)}
 CLOSED_LOOP, IDLE = 8, 1
@@ -89,7 +87,7 @@ class Bench:
         return None
 
     def log(self, name):
-        path = LOGS / f"{self.stamp}_{self.serial}_{self.prefix}-{name}.csv"
+        path = logs_dir() / f"{self.stamp}_{self.serial}_{self.prefix}-{name}.csv"
         with path.open("w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["t"] + FIELDS + ["event"])
@@ -129,6 +127,37 @@ class Bench:
         while abs(self.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
             self.sample()
         self.clear_errors()
+
+    def restore(self, saved, logs, cleanup=None):
+        """Ends a run, also an aborted one: IDLE, watchdog off, a wait for the rotor to coast below 0.5 turn/s,
+        the `saved` settings written back, then `cleanup()`; samples not yet logged go to <prefix>-abort.csv,
+        appended to `logs`. A failure here (USB gone) is printed, not raised: the PSU is the only stop left."""
+        try:
+            self.set("axis0.requested_state", IDLE)
+            self.set("axis0.config.enable_watchdog", False)
+            t = time.monotonic()
+            while abs(self.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
+                time.sleep(0.05)
+            for p, val in saved.items():
+                self.set(p, val)
+            if cleanup is not None:
+                cleanup()
+            if self.rows:
+                logs.append(rel(self.log("abort")))
+        except Exception as ex:  # USB gone: the only stop left is the PSU
+            print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
+
+    def report(self, name, abort, logs, **extra):
+        """Writes logs/<stamp>_<serial>_<name>.json (the checks, the abort reason, the logs and `extra`) and prints
+        the tally. Returns the exit code: 1 if a check failed or the run aborted, else 0."""
+        out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": self.serial, **extra, "abort": abort,
+               "checks": self.checks, "logs": logs}
+        path = logs_dir() / f"{self.stamp}_{self.serial}_{name}.json"
+        path.write_text(json.dumps(out, indent=2) + "\n")
+        failed = [c for c in self.checks if not c["ok"]]
+        print(f"{len(self.checks) - len(failed)}/{len(self.checks)} checks passed; axis IDLE; settings restored "
+              f"-> {rel(path)}")
+        return 1 if failed or abort else 0
 
     def closed_loop(self, control_mode, input_mode):
         self.set("axis0.controller.config.control_mode", control_mode)
@@ -343,29 +372,13 @@ def main():
         b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
         for name in args.tests.split(","):
-            logs.append(str(tests[name](b).relative_to(WORKDIR)))
+            logs.append(rel(tests[name](b)))
     except (Unexpected, KeyboardInterrupt) as ex:
         abort = repr(ex)
         print(f"ABORT: {abort}")
     finally:
-        try:
-            b.set("axis0.requested_state", IDLE)
-            t = time.monotonic()
-            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
-                time.sleep(0.05)
-            for p, val in saved.items():
-                b.set(p, val)
-            if b.rows:
-                logs.append(str(b.log("abort").relative_to(WORKDIR)))
-        except Exception as ex:  # USB gone: the only stop left is the PSU
-            print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
-    out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "tests": args.tests,
-           "abort": abort, "checks": b.checks, "logs": logs}
-    path = LOGS / f"{stamp}_{serial}_safety.json"
-    path.write_text(json.dumps(out, indent=2) + "\n")
-    failed = [c for c in b.checks if not c["ok"]]
-    print(f"{len(b.checks) - len(failed)}/{len(b.checks)} checks passed; axis IDLE; settings restored -> {path.relative_to(WORKDIR)}")
-    return 1 if failed or abort else 0
+        b.restore(saved, logs)
+    return b.report("safety", abort, logs, tests=args.tests)
 
 
 if __name__ == "__main__":

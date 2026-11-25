@@ -21,14 +21,13 @@ copies this run to configs/regress-baseline_<serial>.json, including its --hold-
 later runs against that baseline then use by default.
 
 Usage (from the repo root):
-  python tools/regress.py --tag fw-0.5.1-dev --save-baseline
-  python tools/regress.py --tag fw-0.5.6 --baseline configs/regress-baseline_<serial>.json
+  python tools/regress.py --tag first --compare <settings>.json --save-baseline --hold-at 0.5
+  python tools/regress.py --tag <change> --compare <settings>.json --baseline configs/regress-baseline_<serial>.json
 """
 import argparse
 import contextlib
 import datetime
 import io
-import csv
 import json
 import math
 import pathlib
@@ -40,10 +39,8 @@ import numpy as np
 
 import analyze_ripple
 import analyze_settle
+from logfiles import logs_dir, read_columns, rel
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
-CONFIGS = WORKDIR / "configs"
 PY = sys.executable
 
 # metric -> (direction, relative tolerance, absolute floor). direction +1 = higher is worse.
@@ -68,7 +65,7 @@ def run(script, *args):
     """Run one of the bench scripts; return its stdout (and fail loudly if it fails)."""
     cmd = [PY, str(pathlib.Path(__file__).resolve().parent / script), *args]
     print(f"\n$ {' '.join(cmd[1:])}", flush=True)
-    p = subprocess.run(cmd, cwd=WORKDIR, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=pathlib.Path.cwd(), capture_output=True, text=True)
     sys.stdout.write("".join("  | " + ln + "\n" for ln in p.stdout.strip().splitlines()[-12:]))
     if p.returncode != 0:
         sys.stdout.write(p.stderr[-2000:])
@@ -77,7 +74,7 @@ def run(script, *args):
 
 
 def newest(pattern):
-    hits = sorted(LOGS.glob(pattern))
+    hits = sorted(logs_dir().glob(pattern))
     if not hits:
         raise SystemExit(f"no log matching {pattern}")
     return hits[-1]
@@ -85,46 +82,22 @@ def newest(pattern):
 
 def current_spikes(csv_path):
     """Closed-loop samples below 1 turn/s whose measured current jumps away from the command for one sample
-    (|Id| > 1.5 A or |Iq_meas - Iq_setpoint| > 1.5 A). They happen sporadically on every firmware build so
-    far, and a single one sets the peak-current metrics and adds ~0.05 A rms to the hold noise, so the count
-    is reported next to them (not checked)."""
-    rows = list(csv.reader(line for line in open(csv_path) if not line.startswith("#")))
-    ix = {n: i for i, n in enumerate(rows[0])}
-    n = 0
-    for r in rows[1:]:
-        try:
-            if r[ix["axis0.current_state"]] != "8" or abs(float(r[ix["axis0.encoder.vel_estimate"]])) >= 1.0:
-                continue
-            idm = float(r[ix["axis0.motor.current_control.Id_measured"]])
-            diq = float(r[ix["axis0.motor.current_control.Iq_measured"]]) - float(r[ix["axis0.motor.current_control.Iq_setpoint"]])
-        except ValueError:
-            continue
-        n += abs(idm) > 1.5 or abs(diq) > 1.5
-    return n
+    (|Id| > 1.5 A or |Iq_meas - Iq_setpoint| > 1.5 A). They happen sporadically, and a single one sets the
+    peak-current metrics and adds ~0.05 A rms to the hold noise, so the count is reported next to them (not
+    checked)."""
+    d = read_columns(csv_path)
+    cc = "axis0.motor.current_control."
+    holding = (d["axis0.current_state"] == 8) & (np.abs(d["axis0.encoder.vel_estimate"]) < 1.0)
+    jump = (np.abs(d[cc + "Id_measured"]) > 1.5) | (np.abs(d[cc + "Iq_measured"] - d[cc + "Iq_setpoint"]) > 1.5)
+    return int((holding & jump).sum())
 
 
 def ripple_metrics(csv_path, lo=4.5, hi=6.5):
-    """analyze_ripple's angle-locked report, captured instead of printed."""
-    import csv as _csv
-    with open(csv_path) as f:
-        r = _csv.reader(f)
-        next(r)
-        h = next(r)
-        rows = list(r)
-    ix = {k: i for i, k in enumerate(h)}
-
-    def c(k):
-        return np.array([1.0 if x[ix[k]] == "True" else 0.0 if x[ix[k]] == "False" else float(x[ix[k]]) for x in rows])
-
-    moving = (c("axis0.controller.trajectory_done") == 0) & (c("axis0.current_state") == 8)
-    vsp, vest = c("axis0.controller.vel_setpoint"), c("axis0.encoder.vel_estimate")
-    th = c("axis0.encoder.pos_abs") / 16384 * 2 * math.pi
-    iqm, idm = c("axis0.motor.current_control.Iq_measured"), c("axis0.motor.current_control.Id_measured")
-    signals = {"vel_err t/s": vest - vsp, "Iq_meas A": iqm, "Id_meas A": idm}
+    """analyze_ripple's angle-locked report on a move log: (its numbers, its printed text)."""
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
-        res = analyze_ripple.locked_report(th, vsp, moving, signals, iqm, idm, lo, hi, [4, 8], 0.75, 4)
-    return res or {}, buf.getvalue()
+        res = analyze_ripple.locked_report(read_columns(csv_path), lo, hi, [4, 8], 0.75, 4)
+    return res, buf.getvalue()
 
 
 def main():
@@ -156,7 +129,7 @@ def main():
     out["config_diffs"] = d["diff_vs_expected"]
     out["boot_errors"] = {k: e for k, e in d["errors_decoded"].items()
                           if isinstance(e, dict) and e.get("flags")}
-    out["files"]["dump"] = str(dump_path.relative_to(WORKDIR))
+    out["files"]["dump"] = rel(dump_path)
 
     # 2. Hold noise.
     if hold_at is not None:
@@ -171,7 +144,7 @@ def main():
     M["hold.I_meas_noise"] = math.hypot(M["hold.Iq_meas_std"], M["hold.Id_std"])
     M["hold.abs_Iq_meas_mean"] = abs(h["results"][0]["Iq_meas_mean"])
     M["hold.current_spikes"] = current_spikes(hp.with_suffix(".csv"))
-    out["files"]["hold"] = str(hp.relative_to(WORKDIR))
+    out["files"]["hold"] = rel(hp)
 
     # 3. Moves + settle + ripple.
     run("move_test.py", "--moves", "1,3,10", "--label", f"{label}-move")
@@ -197,7 +170,7 @@ def main():
               "vel_err_rms_unlocked", "Iq_meas_rms_unlocked", "Id_meas_rms_unlocked", "peak_I_A_unlocked"):
         if k in rip:
             M[f"ripple.{k}"] = rip[k]
-    out["files"]["move"] = str(mp.relative_to(WORKDIR))
+    out["files"]["move"] = rel(mp)
 
     # 4. Disturbance.
     if hold_at is not None:
@@ -210,10 +183,10 @@ def main():
     M["disturb.peak_deflection_counts"] = max(abs(s["peak_deflection_counts"]) for s in st)
     M["disturb.recovery_s"] = max(s["recovered_within_band_s"] for s in dt["steps"])
     M["disturb.final_error_counts"] = max(abs(s["final_error_counts"]) for s in dt["steps"])
-    out["files"]["disturb"] = str(dp.relative_to(WORKDIR))
+    out["files"]["disturb"] = rel(dp)
 
     M = out["metrics"] = {k: (round(v, 5) if isinstance(v, float) else v) for k, v in M.items()}
-    path = LOGS / f"{stamp}_{out['serial']}_regress-{args.tag}.json"
+    path = logs_dir() / f"{stamp}_{out['serial']}_regress-{args.tag}.json"
     path.write_text(json.dumps(out, indent=2) + "\n")
 
     # Report.
@@ -239,11 +212,13 @@ def main():
                 problems.append(f"{k}: {val} vs baseline {b}")
         ch = f"{(val - b) / abs(b) * 100:+7.0f}%" if b not in (None, 0) else ""
         print(f"  {k:34s} {val:10.4g} {b if b is not None else '':>10}  {ch:>8s}{flag}")
-    print(f"\nWrote {path.relative_to(WORKDIR)}")
+    print(f"\nWrote {rel(path)}")
     if args.save_baseline:
-        bp = CONFIGS / f"regress-baseline_{out['serial']}.json"
+        configs = pathlib.Path.cwd() / "configs"
+        configs.mkdir(exist_ok=True)
+        bp = configs / f"regress-baseline_{out['serial']}.json"
         bp.write_text(json.dumps(out, indent=2) + "\n")
-        print(f"Saved baseline {bp.relative_to(WORKDIR)}")
+        print(f"Saved baseline {rel(bp)}")
     if problems:
         print("\nPROBLEMS:\n  " + "\n  ".join(problems))
         return 1

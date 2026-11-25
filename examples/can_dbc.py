@@ -7,7 +7,7 @@ set to the board's baud rate (`ip link set can0 up type can bitrate 250000`):
     pip install python-can cantools
     python examples/can_dbc.py --channel can0 --node 0
 
-Not yet run on a bus: this firmware's CAN bus test is still open.
+This example has no bench test against a board; tools/can_test.py is the tested CAN client.
 """
 import argparse
 import math

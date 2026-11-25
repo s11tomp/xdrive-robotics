@@ -21,17 +21,17 @@ Logs: logs/<stamp>_<serial>_regen-test.json + one capture CSV per move.
 
 Usage (from the repo root):  python tools/regen_test.py
 """
+import argparse
 import datetime
-import json
 import sys
-import time
 
 import numpy as np
 
 from capture import RISING, capture, read, save, setup, wait_done
+from logfiles import rel
 from xdrive import usb
 from xdrive.props import odrv
-from safety_test import CLOSED_LOOP, IDLE, LOGS, POS, WORKDIR, SETTINGS, TRAP, Bench, Unexpected
+from safety_test import CLOSED_LOOP, IDLE, POS, SETTINGS, TRAP, Bench, Unexpected
 
 ACCEL = 30.0      # turn/s^2
 HARD = 120.0      # turn/s^2
@@ -75,7 +75,7 @@ def move(b, vel, label, results, accel=ACCEL):
         print(f"  {label} {vel:g} turn/s: {out}")
         return out
     t, d, meta = read(b.board, fields, types)
-    out["csv"] = str(save(t, d, meta, b.serial, f"regen-{label}-{vel:g}").relative_to(WORKDIR))
+    out["csv"] = rel(save(t, d, meta, b.serial, f"regen-{label}-{vel:g}"))
     dt = meta["period_s"]
     vbus = d["vbus_voltage"].astype(float)
     ibrake = d["brake_resistor_current"].astype(float)
@@ -182,6 +182,7 @@ def test_regen(b):
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     board = usb.connect()
     serial = format(board.get(odrv.serial_number), "X")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -192,31 +193,16 @@ def main():
         b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
         results = test_regen(b)
-        logs.append(str(b.log("test").relative_to(WORKDIR)))
+        logs.append(rel(b.log("test")))
     except (Unexpected, KeyboardInterrupt, StopIteration, IndexError) as ex:
         abort = repr(ex)
         print(f"ABORT: {abort}")
     finally:
-        try:
-            b.set("axis0.requested_state", IDLE)
-            t = time.monotonic()
-            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
-                time.sleep(0.05)
-            for p, val in saved.items():
-                b.set(p, val)
+        def cleanup():
             board.call(odrv.capture.clear_channels())
             b.clear_errors()
-            if b.rows:
-                logs.append(str(b.log("abort").relative_to(WORKDIR)))
-        except Exception as ex:  # USB gone: the only stop left is the PSU
-            print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
-    out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "abort": abort,
-           "checks": b.checks, "moves": results, "logs": logs}
-    path = LOGS / f"{stamp}_{serial}_regen-test.json"
-    path.write_text(json.dumps(out, indent=2) + "\n")
-    failed = [c for c in b.checks if not c["ok"]]
-    print(f"{len(b.checks) - len(failed)}/{len(b.checks)} checks passed; axis IDLE; settings restored -> {path.relative_to(WORKDIR)}")
-    return 1 if failed or abort else 0
+        b.restore(saved, logs, cleanup)
+    return b.report("regen-test", abort, logs, moves=results)
 
 
 if __name__ == "__main__":

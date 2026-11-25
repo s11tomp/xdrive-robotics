@@ -23,12 +23,11 @@ import sys
 import time
 from typing import Any
 
+from logfiles import logs_dir, rel
 from xdrive import paths, report, usb
 from xdrive.errors import InterfaceMismatch, LinkError, XdriveError
 from xdrive.model import Prop, RwProp
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 # Fields worth eyeballing in the console summary.
 SUMMARY = [
@@ -137,9 +136,8 @@ def main():
 
     stamp = t_host.strftime("%Y%m%d-%H%M%S")
     stem = f"{stamp}_{serial}" + (f"_{args.label}" if args.label else "")
-    LOGS.mkdir(exist_ok=True)
-    dump_path = LOGS / f"{stem}_dump.json"
-    backup_path = LOGS / f"{stem}_config-backup.json"
+    dump_path = logs_dir() / f"{stem}_dump.json"
+    backup_path = logs_dir() / f"{stem}_config-backup.json"
 
     dump = {
         "meta": {
@@ -181,7 +179,7 @@ def main():
             print(f"  {k}: expected {d['expected']}, actual {d['actual']}")
     if failures:
         print(f"\n{len(failures)} properties failed to read (see read_failures in the dump)")
-    print(f"\nWrote {dump_path.relative_to(WORKDIR)}\n      {backup_path.relative_to(WORKDIR)}")
+    print(f"\nWrote {rel(dump_path)}\n      {rel(backup_path)}")
     return 0
 
 

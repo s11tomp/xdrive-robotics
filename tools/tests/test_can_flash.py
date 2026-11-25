@@ -114,8 +114,7 @@ class FakeBootloader:
 
 @pytest.fixture
 def channel(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    (tmp_path / "logs").mkdir()
-    monkeypatch.setattr(can_flash, "LOGS", tmp_path / "logs")
+    monkeypatch.chdir(tmp_path)
     return f"can-flash-{uuid.uuid4()}"
 
 

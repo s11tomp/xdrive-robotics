@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
-import json
 import pathlib
 import sys
 import time
@@ -35,6 +34,7 @@ from typing import Any
 
 import can as python_can
 
+from logfiles import log_action
 import seal_image
 from xdrive import boot_frame as bf
 from xdrive import can
@@ -42,8 +42,6 @@ from xdrive.enums import AxisState
 from xdrive.errors import InterfaceMismatch, LinkError, LinkLost, LinkTimeout
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/ goes under the working directory
-LOGS = WORKDIR / "logs"
 RETRIES = 3
 ERASE_TIMEOUT = 30.0      # s: erasing all eight application sectors takes up to about 16 s
 ANSWER_TIMEOUT = 1.0      # s: any other answer
@@ -277,9 +275,7 @@ def main(argv: list[str] | None = None) -> int:
                   "(--serial if its node ID is unknown); USB DFU and SWD always work.")
             code = 2
     record["total_s"] = round(time.monotonic() - t0, 1)
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps(record) + "\n")
+    log_action(record)
     return code
 
 

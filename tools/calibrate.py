@@ -8,7 +8,7 @@
   --correction  AXIS_STATE_ENCODER_CORRECTION_CALIBRATION (14, this firmware): one mechanical turn
                 each way at the calibration current (~25 s). Reports rms/peak error and bins, writes
                 the table to logs/<stamp>_<serial>_correction-table.json, then re-runs --offset.
-  --save        save_configuration() at the end (v0.5.6: the board reboots and runs its startup
+  --save        save_configuration() at the end (the board reboots and runs its startup
                 sequence; if startup calibration is enabled, the motor moves again).
 
 Steps run in the order motor, offset, correction. Each waits for the axis to return to IDLE,
@@ -20,18 +20,16 @@ import argparse
 import datetime
 import json
 import math
-import pathlib
 import sys
 import time
 from typing import Any
 
-from correction_table import read_table
+from correction_table import harmonics, read_table
+from logfiles import log_action, logs_dir, rel
 from xdrive import report, usb
 from xdrive.enums import AxisState
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 IDLE = AxisState.IDLE
 
 
@@ -77,8 +75,8 @@ def main():
         run_state(b, AxisState.MOTOR_CALIBRATION, "motor calibration", 20)
         r: dict[str, Any] = {"phase_resistance": b.get(mc.phase_resistance), "phase_inductance": b.get(mc.phase_inductance)}
         b.set(mc.pre_calibrated, True)
-        print(f"  R = {r['phase_resistance'] * 1000:.1f} mOhm, L = {r['phase_inductance'] * 1e6:.1f} uH "
-              f"(v0.5.1 measured 56.2 mOhm, 25.8 uH); motor.config.pre_calibrated = True")
+        print(f"  R = {r['phase_resistance'] * 1000:.1f} mOhm, L = {r['phase_inductance'] * 1e6:.1f} uH; "
+              "motor.config.pre_calibrated = True")
         rec["results"]["motor"] = r
 
     def offset():
@@ -109,26 +107,20 @@ def main():
         print(f"  error rms {rms_c:.1f} counts ({rms_c * deg:.2f} deg), peak {peak_c:.1f} counts "
               f"({peak_c * deg:.2f} deg), {bins}/256 bins; correction_enabled = {enabled}")
         # Harmonic content of the table (which rotor-angle harmonics the error has)
-        harm = []
-        for h in range(1, 13):
-            c = sum(t * math.cos(2 * math.pi * h * (k + 0.5) / 256) for k, t in enumerate(table)) * 2 / 256
-            s = sum(t * math.sin(2 * math.pi * h * (k + 0.5) / 256) for k, t in enumerate(table)) * 2 / 256
-            harm.append((h, math.hypot(c, s), math.degrees(math.atan2(s, c))))
+        harm = [(h, math.hypot(c, s), math.degrees(math.atan2(s, c))) for h, c, s in harmonics(table, 12)]
         top = sorted(harm, key=lambda x: -x[1])[:4]
         print("  largest harmonics (per turn): " + ", ".join(f"{h}x {a * deg:.2f} deg @ {p:.0f}" for h, a, p in top))
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        out = LOGS / f"{stamp}_{serial}_correction-table.json"
+        out = logs_dir() / f"{stamp}_{serial}_correction-table.json"
         out.write_text(json.dumps({"serial": serial, **r, "table_counts": table,
                                    "harmonics_counts": [{"h": h, "amp": a, "phase_deg": p} for h, a, p in harm]},
                                   indent=2) + "\n")
-        print(f"  table -> {out.relative_to(WORKDIR)}")
-        r["file"] = str(out.relative_to(WORKDIR))
+        print(f"  table -> {rel(out)}")
+        r["file"] = rel(out)
         rec["results"]["correction"] = r
         rec["results"]["offset_after_correction"] = offset()
 
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps(rec) + "\n")
+    log_action(rec)
     if args.save:
         print("\nSaving: the board saves and REBOOTS; its startup sequence runs.")
         b.save()

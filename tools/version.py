@@ -1,8 +1,13 @@
+"""The firmware version from `git describe --match=*fw*`: a build after the tag fw-vX.Y.Z (or of a modified
+tree) reports X.Y.Z as unreleased. Writes it as the C constants of the build's version.c.
 
+Usage: python tools/version.py --output build/autogen/version.c
+"""
+import os
 import re
 import subprocess
-import os
 import sys
+
 
 def version_str_to_tuple(version_string):
     """
@@ -32,9 +37,6 @@ def get_version_from_git():
         git_tag = git_tag.decode(sys.stdout.encoding or 'ascii').rstrip('\n')
 
         (major, minor, revision, is_prerelease) = version_str_to_tuple(git_tag)
-
-        # if is_prerelease:
-        #     revision += 1
         return git_tag, major, minor, revision, is_prerelease
 
     except Exception as ex:
@@ -53,7 +55,6 @@ if __name__ == '__main__':
     print('Firmware version {}.{}.{}{} ({})'.format(
         major, minor, revision, '-dev' if unreleased else '',
         git_name))
-    #args.output.write('const unsigned char fw_version = "{}"\n'.format(git_name))
     args.output.write('const unsigned char fw_version_major_ = {};\n'.format(major))
     args.output.write('const unsigned char fw_version_minor_ = {};\n'.format(minor))
     args.output.write('const unsigned char fw_version_revision_ = {};\n'.format(revision))

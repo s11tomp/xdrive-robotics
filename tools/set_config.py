@@ -30,14 +30,13 @@ import pathlib
 import subprocess
 import sys
 
+from logfiles import log_action
 from xdrive import paths, usb
 from xdrive.enums import AxisState
 from xdrive.errors import LinkError, Refused
 from xdrive.model import RwProp
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 
 def parse(prop, text):
@@ -161,11 +160,9 @@ def main():
         else:
             print("Not saving: a readback mismatched.")
     b.close()
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": datetime.datetime.now().astimezone().isoformat(), "action": "set_config",
-                            "serial": serial, "pre_dump": snap[0].split()[-1], "file": args.file,
-                            "changes": changes, "skipped": skipped, "saved": saved}) + "\n")
+    log_action({"t": datetime.datetime.now().astimezone().isoformat(), "action": "set_config",
+                "serial": serial, "pre_dump": snap[0].split()[-1], "file": args.file,
+                "changes": changes, "skipped": skipped, "saved": saved})
     return 0 if all(c["ok"] for c in changes) and (saved or not args.save) else 3
 
 

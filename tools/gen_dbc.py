@@ -4,7 +4,7 @@ SavvyCAN and other DBC readers.
 
 Each message is defined once per node ID 0 to 7 (Node<n>_<message>, arbitration ID n << 5 | command),
 with the layouts of src/communication/can/can_simple.cpp. Error and state values come from
-tools/enums_v056.py. The impedance command's scales assume the default axis.config.can.impedance_*
+xdrive.enums. The impedance command's scales assume the default axis.config.can.impedance_*
 ranges (tools/xdrive/impedance_frame.py Ranges); the node answers it, and endpoint access, on the same ID
 with a reply a DBC can't also describe (see the messages' comments).
 
@@ -16,8 +16,8 @@ from cantools.database import dump_file
 from cantools.database.can import Bus, Database, Message, Node, Signal
 from cantools.database.conversion import BaseConversion
 
-import enums_v056 as e
 from xdrive import endpoint_frame, impedance_frame
+from xdrive import enums as e
 
 OUTPUT = pathlib.Path(__file__).resolve().parents[1] / "docs" / "cansimple.dbc"
 NODES = range(8)

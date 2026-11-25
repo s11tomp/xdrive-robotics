@@ -31,14 +31,14 @@ Usage (from the repo root):
 import argparse
 import datetime
 import itertools
-import json
 import math
 import sys
 import time
 
 from impedance_test import IMPEDANCE, gains
+from logfiles import log_action, rel
 from move_test import ERROR_FIELDS, error_problems, trap_time
-from safety_test import CLOSED_LOOP, IDLE, IX, LOGS, PASSTHROUGH, POS, SETTINGS, TRAP, WORKDIR, Bench, Unexpected
+from safety_test import CLOSED_LOOP, IDLE, IX, PASSTHROUGH, POS, SETTINGS, TRAP, Bench, Unexpected
 from xdrive import usb
 from xdrive.errors import LinkError
 from xdrive.props import odrv
@@ -165,7 +165,6 @@ def main():
     b = DemoBench(board, stamp, serial, prefix="demo")
     saved = {p: b.get(p) for p in SETTINGS + [FILTER_BW_PATH]}
     b.set("axis0.config.enable_watchdog", False)  # nothing feeds it here; restored with the rest
-    LOGS.mkdir(exist_ok=True)
     loops, abort, log = 0, None, None
     name = "spring" if args.spring is not None else "last-loop"
     print(f"Demo on {serial}. Ctrl-C stops it (the motor goes limp).")
@@ -195,14 +194,13 @@ def main():
                 log = b.log(name)
         except Exception as ex:  # USB gone: the only stop left is the PSU
             print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": datetime.datetime.now().astimezone().isoformat(), "action": "demo",
-                            "argv": sys.argv[1:], "loops_completed": loops, "abort": abort,
-                            "log": log.name if log else None}) + "\n")
+    log_action({"t": datetime.datetime.now().astimezone().isoformat(), "action": "demo",
+                "argv": sys.argv[1:], "loops_completed": loops, "abort": abort,
+                "log": log.name if log else None})
     done = "spring" if args.spring is not None else f"{loops} loop(s) completed"
     print(f"{done}; {'stopped: ' + abort if abort else 'done'}. Axis IDLE, settings restored.")
     if log:
-        print(f"log -> {log.relative_to(WORKDIR)}")
+        print(f"log -> {rel(log)}")
     return 0 if abort in (None, "Ctrl-C") else 3
 
 

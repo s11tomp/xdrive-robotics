@@ -17,7 +17,6 @@ Usage:
   python tools/disturb_test.py --torque 0.2 --vel-int-gain 2.5 --label dist-ki2.5
 """
 import argparse
-import csv
 import datetime
 import json
 import pathlib
@@ -26,14 +25,13 @@ import time
 
 import numpy as np
 
-from move_test import CLOSED_LOOP, FIELDS, IX, SETTINGS, Abort, Recorder, error_problems
+from logfiles import log_action, logs_dir, rel
+from move_test import IX, SETTINGS, Abort, Recorder, error_problems
 from xdrive import paths, report, usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 CPR = 16384
 
 
@@ -110,12 +108,7 @@ def main():
             (f"torque {-args.torque:+g}", -args.torque, args.step_s), ("torque 0 (end)", 0.0, args.step_s)]
     try:
         rec.event = "closed_loop_request"
-        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)  # firmware sets input_pos = pos_estimate on entry
-        deadline = time.monotonic() + 1.0
-        while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
-            if time.monotonic() > deadline:
-                raise Abort("did not enter closed loop within 1 s")
-        rec.expect_closed_loop = True
+        rec.enter_closed_loop()  # firmware sets input_pos = pos_estimate on entry
         hold_pos = b.get(ax.controller.input_pos)
         for name, torque, dur in plan:
             rec.event = name
@@ -145,22 +138,16 @@ def main():
         except Exception as ex:
             print(f"Post-run read/restore failed: {ex!r}")
 
-    LOGS.mkdir(exist_ok=True)
-    stem = LOGS / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
-    with open(f"{stem}.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", "disturb_test.py"])
-        w.writerow(["t"] + FIELDS + ["event"])
-        w.writerows(rec.rows)
+    stem = logs_dir() / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
+    rec.write_csv(f"{stem}.csv", start_stamp, serial, "disturb_test.py")
     meta = {"host_start": start_stamp.isoformat(), "serial": serial, "argv": sys.argv[1:], "gains": gains,
             "torque_Nm": args.torque, "settings_applied_ram_only": applied, "previous_values_restored": changed,
             "hold_pos": hold_pos, "steps": steps, "abort_reason": abort_reason, "final_errors": final_errors,
             "samples": len(rec.rows)}
     pathlib.Path(f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": start_stamp.isoformat(), "action": "disturb_test", "argv": sys.argv[1:],
-                            "abort_reason": abort_reason, "log": f"{stem.name}.csv"}) + "\n")
-    print(f"\n{len(rec.rows)} samples -> {stem.relative_to(WORKDIR)}.csv/.json")
+    log_action({"t": start_stamp.isoformat(), "action": "disturb_test", "argv": sys.argv[1:],
+                "abort_reason": abort_reason, "log": f"{stem.name}.csv"})
+    print(f"\n{len(rec.rows)} samples -> {rel(stem)}.csv/.json")
     print(f"gains: pos {gains['pos_gain']:g}, vel {gains['vel_gain']:g}, vel_int {gains['vel_integrator_gain']:g}, "
           f"inertia {gains['inertia']:g}")
     print(f"Result: {'ABORTED: ' + abort_reason if abort_reason else 'completed'}; axis left IDLE; "

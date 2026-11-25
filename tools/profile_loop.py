@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Control-loop CPU time and thread stack headroom (firmware v0.5.2+). MOTOR HOLDS (closed loop, no move).
+"""Control-loop CPU time and thread stack headroom. MOTOR HOLDS (closed loop, no move).
 
 Arms <odrv>.task_timers_armed N times while axis0 holds position in closed loop; each arming makes the
 firmware time one control iteration (TIM13, in 168 MHz cycles). Reports per-task length (mean / max),
@@ -11,17 +11,15 @@ Usage (from the repo root):  python tools/profile_loop.py [--samples 200]
 import argparse
 import datetime
 import json
-import pathlib
 import statistics
 import sys
 import time
 
+from logfiles import logs_dir
 from xdrive import paths, usb
 from xdrive.enums import AxisState
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 CLOCK_HZ = 168e6
 PERIOD_CYCLES = CLOCK_HZ / 8000.0          # 21000 cycles per control iteration
 WRAP = 65536                               # sample_TIM13() returns uint16
@@ -101,8 +99,7 @@ def main():
            "stacks": {k: {"max_used": u, "size": s} for k, (u, s) in stacks.items()},
            "min_heap_space": min_heap}
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    LOGS.mkdir(exist_ok=True)
-    (LOGS / f"{stamp}_{serial}_profile-loop.json").write_text(json.dumps(out, indent=2) + "\n")
+    (logs_dir() / f"{stamp}_{serial}_profile-loop.json").write_text(json.dumps(out, indent=2) + "\n")
     return 0
 
 

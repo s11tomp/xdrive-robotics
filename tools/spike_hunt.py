@@ -28,16 +28,14 @@ import argparse
 import csv
 import datetime
 import json
-import pathlib
 import sys
 import time
 
+from logfiles import logs_dir, rel
 from xdrive import usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 CLOSED_LOOP, IDLE = AxisState.CLOSED_LOOP_CONTROL, AxisState.IDLE
 
 
@@ -148,8 +146,7 @@ def main():
             b.set(ax.trap_traj.config.vel_limit, saved_trap_vel)
         except Exception as ex:  # USB gone: the only stop left is the PSU
             print(f"!!! Could not command IDLE ({ex!r}). Press OUT on the PSU.")
-    LOGS.mkdir(exist_ok=True)
-    base = LOGS / f"{stamp}_{serial}_spike-hunt"
+    base = logs_dir() / f"{stamp}_{serial}_spike-hunt"
     with base.with_suffix(".csv").open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t", "offset_turn", "Id_measured", "Iq_measured"])
@@ -157,7 +154,7 @@ def main():
     base.with_suffix(".json").write_text(json.dumps(
         {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "argv": sys.argv[1:],
          "threshold_A": args.threshold, "abort": abort, "results": results}, indent=2) + "\n")
-    print(f"axis IDLE -> {base.relative_to(WORKDIR)}.csv/.json")
+    print(f"axis IDLE -> {rel(base)}.csv/.json")
     return 1 if abort else 0
 
 

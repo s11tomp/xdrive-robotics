@@ -14,35 +14,23 @@ gains can be compared side by side.
 Usage:  python tools/analyze_settle.py logs/<a>.csv [logs/<b>.csv ...] [--band 10]
 """
 import argparse
-import csv
 import statistics as st
 
 import numpy as np
+
+from logfiles import read_columns
 
 CPR = 16384
 
 
 def load(path):
-    with open(path) as f:
-        r = csv.reader(f)
-        next(r)
-        h = next(r)
-        rows = list(r)
-    ix = {k: i for i, k in enumerate(h)}
-
-    def c(k, rs):
-        return np.array([1.0 if x[ix[k]] == "True" else 0.0 if x[ix[k]] == "False" else float(x[ix[k]]) for x in rs])
-
-    segs, cur = [], None
-    for row in rows:
-        ev = row[ix["event"]]
-        if ev:
-            cur = [ev, []]
-            segs.append(cur)
-        if cur:
-            cur[1].append(row)
-    return [(name, {k: c(k, rs) for k in ix if k != "event"}) for name, rs in segs
-            if name.startswith(("out", "back"))]
+    """The log's "out" and "back" move segments: (event name, columns) from each such event row up to the
+    next event row."""
+    d = read_columns(path)
+    events = d.pop("event")
+    starts = np.nonzero(events != "")[0].tolist()
+    return [(str(events[a]), {k: v[a:b] for k, v in d.items()})
+            for a, b in zip(starts, starts[1:] + [len(events)]) if events[a].startswith(("out", "back"))]
 
 
 def metrics(d, band):

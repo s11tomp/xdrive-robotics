@@ -11,9 +11,10 @@ pos_estimate.
 Usage:  python tools/analyze_encoder.py logs/<file>.csv [--threshold 100]
 """
 import argparse
-import csv
 import statistics as st
 import sys
+
+from logfiles import read_columns
 
 CPR = 16384
 
@@ -24,12 +25,7 @@ def main():
     ap.add_argument("--threshold", type=float, default=100, help="glitch threshold in counts (default 100 ≈ 2.2°)")
     args = ap.parse_args()
 
-    with open(args.csv) as f:
-        r = csv.reader(f)
-        next(r)  # metadata row
-        header = next(r)
-        rows = [list(map(float, row)) for row in r]
-    col = {h: [row[i] for row in rows] for i, h in enumerate(header)}
+    col = {h: v.tolist() for h, v in read_columns(args.csv).items()}
     t, raw = col["t"], col["axis0.encoder.pos_abs"]
 
     # Unwrap raw counts across the 0/16383 boundary
@@ -59,7 +55,7 @@ def main():
     off = st.median(xi - ei for xi, ei in zip(x, est))
     gap = sorted(abs(xi - ei - off) for xi, ei in zip(x, est))
     print(f"|raw - pos_estimate| (counts): median {st.median(gap):.1f}  p99 {gap[int(0.99 * (len(gap) - 1))]:.1f}  max {gap[-1]:.1f}")
-    errs = {h: sorted({int(v) for v in col[h] if v}) for h in header if h.endswith("error")}
+    errs = {h: sorted({int(v) for v in vs if v}) for h, vs in col.items() if h.endswith("error")}
     print("nonzero errors:", {k: [hex(v) for v in vs] for k, vs in errs.items() if vs} or "none")
     return 0
 

@@ -12,6 +12,7 @@ Leaves the capture cleared and test_property restored. Log: logs/<stamp>_<serial
 
 Usage (from the repo root):  python tools/capture_test.py
 """
+import argparse
 import datetime
 import json
 import sys
@@ -19,7 +20,8 @@ import time
 
 import numpy as np
 
-from capture import ARMED, DONE, FALLING, IDLE, LOGS, MANUAL, RISING, WORKDIR, capture, read, setup, wait_done
+from capture import ARMED, FALLING, IDLE, MANUAL, RISING, capture, read, setup, wait_done
+from logfiles import logs_dir, rel
 from xdrive import usb
 from xdrive.enums import ControlMode
 from xdrive.props import odrv
@@ -29,6 +31,7 @@ CPU_HZ = 168e6
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     b = usb.connect()
     serial = format(b.get(odrv.serial_number), "X")
     c = odrv.capture
@@ -149,10 +152,10 @@ def main():
 
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "checks": checks}
-    path = LOGS / f"{stamp}_{serial}_capture-test.json"
+    path = logs_dir() / f"{stamp}_{serial}_capture-test.json"
     path.write_text(json.dumps(out, indent=2) + "\n")
     failed = [ch for ch in checks if not ch["ok"]]
-    print(f"{len(checks) - len(failed)}/{len(checks)} checks passed -> {path.relative_to(WORKDIR)}")
+    print(f"{len(checks) - len(failed)}/{len(checks)} checks passed -> {rel(path)}")
     return 1 if failed else 0
 
 

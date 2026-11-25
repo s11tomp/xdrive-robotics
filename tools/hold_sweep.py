@@ -26,7 +26,6 @@ Usage:
   python tools/hold_sweep.py --start 0.0444 --span 0.155 --points 16 --label hold-sweep-after
 """
 import argparse
-import csv
 import datetime
 import json
 import pathlib
@@ -35,14 +34,13 @@ import time
 
 import numpy as np
 
-from move_test import CLOSED_LOOP, FIELDS, IX, SETTINGS, Abort, Recorder, error_problems, trap_time
+from logfiles import log_action, logs_dir, rel
+from move_test import FIELDS, IX, SETTINGS, Abort, Recorder, error_problems, trap_time
 from xdrive import paths, usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 CPR = 16384
 P = "axis0.motor.current_control."
 
@@ -124,12 +122,7 @@ def main():
             # the rotor can't follow a trajectory faster than the velocity limit: the following-error guard trips
             raise Abort(f"trap vel_limit {trap['vel_limit']:g} turn/s is above controller vel_limit {vel_limit:g}; "
                         f"pass --trap-vel {vel_limit:g} or lower")
-        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
-        deadline = time.monotonic() + 1.0
-        while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
-            if time.monotonic() > deadline:
-                raise Abort("did not enter closed loop within 1 s")
-        rec.expect_closed_loop = True
+        rec.enter_closed_loop()
         home = b.get(ax.controller.input_pos)
         if start is None:
             start = home
@@ -187,22 +180,16 @@ def main():
             print(f"  {k:5d}  {d:+7.3f} A  {f:+7.3f} A")
         print("summary: " + ", ".join(f"{k} {v}" for k, v in summary.items()))
 
-    LOGS.mkdir(exist_ok=True)
-    stem = LOGS / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
-    with open(f"{stem}.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", "hold_sweep.py"])
-        w.writerow(["t"] + FIELDS + ["event"])
-        w.writerows(rec.rows)
+    stem = logs_dir() / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
+    rec.write_csv(f"{stem}.csv", start_stamp, serial, "hold_sweep.py")
     pathlib.Path(f"{stem}.json").write_text(json.dumps(
         {"host_start": start_stamp.isoformat(), "serial": serial, "argv": sys.argv[1:], "start_turn": start,
          "settings_applied_ram_only": applied,
          "previous_values_restored": changed, "results": results, "summary": summary,
          "abort_reason": abort_reason}, indent=2) + "\n")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": start_stamp.isoformat(), "action": "hold_sweep", "argv": sys.argv[1:],
-                            "start_turn": start, "abort_reason": abort_reason, "log": f"{stem.name}.csv"}) + "\n")
-    print(f"\n-> {stem.relative_to(WORKDIR)}.csv/.json")
+    log_action({"t": start_stamp.isoformat(), "action": "hold_sweep", "argv": sys.argv[1:],
+                "start_turn": start, "abort_reason": abort_reason, "log": f"{stem.name}.csv"})
+    print(f"\n-> {rel(stem)}.csv/.json")
     print(f"Result: {'ABORTED: ' + abort_reason if abort_reason else 'completed'}; axis left IDLE; "
           f"restored: {list(changed) or 'none changed'}")
     return 3 if abort_reason else 0

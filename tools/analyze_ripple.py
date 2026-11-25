@@ -18,19 +18,36 @@ Usage:  python tools/analyze_ripple.py logs/<move>.csv [--J 5e-4 --E-deg 1.44 --
         python tools/analyze_ripple.py logs/<move>.csv --bw 2000 --locked 4.5 7
 """
 import argparse
-import csv
 import math
 
 import numpy as np
 
+from logfiles import read_columns
 
-def locked_report(th, vsp, moving, signals, iqm, idm, lo, hi, harmonics, band, k_phase):
-    """Angle-locked share of the ripple over |vsp| in [lo, hi): what an encoder correction table could remove.
+CC = "axis0.motor.current_control."
+
+
+def moving(d):
+    """Samples in closed loop with a trajectory running."""
+    return (d["axis0.controller.trajectory_done"] == 0) & (d["axis0.current_state"] == 8)
+
+
+def rotor_angle(d):
+    """The raw encoder angle in rad (the 14-bit pos_abs)."""
+    return d["axis0.encoder.pos_abs"] / 16384 * 2 * math.pi
+
+
+def locked_report(d, lo, hi, harmonics, band, k_phase):
+    """Angle-locked share of the ripple over |vel_setpoint| in [lo, hi) of a move_test.py log (read_columns):
+    what an encoder correction table could remove.
 
     Prints a report and returns the numbers: <signal>_rms and <signal>_rms_unlocked (signal = vel_err, Iq_meas,
     Id_meas), peak_I_A and peak_I_A_unlocked, id_phase_deg per direction. Empty dict if no band had enough samples.
     """
-    sel = moving & (np.abs(vsp) >= lo) & (np.abs(vsp) < hi)
+    vsp, th = d["axis0.controller.vel_setpoint"], rotor_angle(d)
+    iqm, idm = d[CC + "Iq_measured"], d[CC + "Id_measured"]
+    signals = {"vel_err t/s": d["axis0.encoder.vel_estimate"] - vsp, "Iq_meas A": iqm, "Id_meas A": idm}
+    sel = moving(d) & (np.abs(vsp) >= lo) & (np.abs(vsp) < hi)
     n_h = 2 * len(harmonics)
     used = np.zeros(len(vsp), bool)
     ssr_before = {name: 0.0 for name in signals}
@@ -72,14 +89,11 @@ def locked_report(th, vsp, moving, signals, iqm, idm, lo, hi, harmonics, band, k
         print(f"  {name:14s}  {before:8.3f}      {after:8.3f}   ({before / after:4.1f}x)")
         key = name.split()[0]
         res[f"{key}_rms"], res[f"{key}_rms_unlocked"] = before, after
-    iq_names = [s for s in signals if s.startswith("Iq")]
-    id_names = [s for s in signals if s.startswith("Id")]
-    if iq_names and id_names:
-        iql, idl = locked[iq_names[0]], locked[id_names[0]]
-        pk0 = np.hypot(iqm[used], idm[used]).max()
-        pk1 = np.hypot(iqm[used] - iql[used], idm[used] - idl[used]).max()
-        print(f"  peak |I| = sqrt(Iq²+Id²): {pk0:.2f} A measured -> {pk1:.2f} A without the angle-locked part")
-        res["peak_I_A"], res["peak_I_A_unlocked"] = float(pk0), float(pk1)
+    iql, idl = locked["Iq_meas A"], locked["Id_meas A"]
+    pk0 = np.hypot(iqm[used], idm[used]).max()
+    pk1 = np.hypot(iqm[used] - iql[used], idm[used] - idl[used]).max()
+    print(f"  peak |I| = sqrt(Iq²+Id²): {pk0:.2f} A measured -> {pk1:.2f} A without the angle-locked part")
+    res["peak_I_A"], res["peak_I_A_unlocked"] = float(pk0), float(pk1)
     # Pooled phase per direction: a fingerprint of where the error sits on the rotor.
     out = []
     for d in (1, -1):
@@ -114,32 +128,21 @@ def main():
     ap.add_argument("--band", type=float, default=0.75, help="speed band width for --locked, turn/s")
     args = ap.parse_args()
 
-    with open(args.csv) as f:
-        r = csv.reader(f)
-        next(r)
-        h = next(r)
-        rows = list(r)
-    ix = {k: i for i, k in enumerate(h)}
-
-    def c(k):
-        return np.array([1.0 if x[ix[k]] == "True" else 0.0 if x[ix[k]] == "False" else float(x[ix[k]]) for x in rows])
-
-    moving = (c("axis0.controller.trajectory_done") == 0) & (c("axis0.current_state") == 8)
-    vsp, vest = c("axis0.controller.vel_setpoint"), c("axis0.encoder.vel_estimate")
-    th = c("axis0.encoder.pos_abs") / 16384 * 2 * math.pi
-    iqs, iqm = c("axis0.motor.current_control.Iq_setpoint"), c("axis0.motor.current_control.Iq_measured")
-    idm = c("axis0.motor.current_control.Id_measured")
+    d = read_columns(args.csv)
+    run = moving(d)
+    vsp, vest, th = d["axis0.controller.vel_setpoint"], d["axis0.encoder.vel_estimate"], rotor_angle(d)
+    iqs, iqm, idm = d[CC + "Iq_setpoint"], d[CC + "Iq_measured"], d[CC + "Id_measured"]
     lam = args.Kt / (1.5 * args.pp)
     k, E = args.harmonic, math.radians(args.E_deg)
 
     print(f"{k}x-per-turn ripple amplitude by speed (model: J={args.J:g}, E={args.E_deg}°, Kt={args.Kt})")
     print("  |speed| bin    n   vel_err ±t/s  Iq_sp ±A  Iq_meas ±A  model ±A  peak|Iq_sp|  peak|Iq_meas|"
           f"   Id ±A  Id model ±A (bw {args.bw:g})  peak|I|")
-    top = np.abs(vsp[moving]).max() if moving.any() else 0
+    top = np.abs(vsp[run]).max() if run.any() else 0
     lo = 0.5
     while lo < top:
         hi = lo + args.bin
-        m = moving & (np.abs(vsp) >= lo) & (np.abs(vsp) < hi)
+        m = run & (np.abs(vsp) >= lo) & (np.abs(vsp) < hi)
         if m.sum() >= 12:
             A = np.column_stack([np.ones(m.sum()), np.cos(k * th[m]), np.sin(k * th[m]), vsp[m]])
             amps = []
@@ -157,10 +160,8 @@ def main():
                   f"   {amps[3]:6.2f}      {id_model:6.2f}            {ipk:6.2f}")
         lo = hi
     if args.locked:
-        signals = {"vel_err t/s": vest - vsp, "Iq_meas A": iqm, "Id_meas A": idm}
         harmonics = [int(x) for x in args.locked_harmonics.split(",")]
-        locked_report(th, vsp, moving, signals, iqm, idm, args.locked[0], args.locked[1],
-                      harmonics, args.band, k)
+        locked_report(d, args.locked[0], args.locked[1], harmonics, args.band, k)
     return 0
 
 

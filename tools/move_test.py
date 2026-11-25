@@ -27,14 +27,13 @@ import pathlib
 import sys
 import time
 
+from logfiles import log_action, logs_dir, rel
 from sample import FIELDS as BASE_FIELDS
 from xdrive import paths, report, usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 FIELDS = BASE_FIELDS + ["axis0.controller.trajectory_done", "axis0.motor.I_bus"]
 IX = {f: i for i, f in enumerate(FIELDS)}
@@ -114,10 +113,27 @@ class Recorder:
             raise Abort(f"left closed loop: state={row[1 + IX['axis0.current_state']]}")
         return row
 
+    def enter_closed_loop(self):
+        """Requests closed loop and samples until the axis is in it (Abort after 1 s); the guards then expect it."""
+        self.b.set(odrv.axis0.requested_state, AxisState.CLOSED_LOOP_CONTROL)
+        deadline = time.monotonic() + 1.0
+        while self.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
+            if time.monotonic() > deadline:
+                raise Abort("did not enter closed loop within 1 s")
+        self.expect_closed_loop = True
+
     def run_for(self, seconds):
         end = time.monotonic() + seconds
         while time.monotonic() < end:
             self.sample()
+
+    def write_csv(self, path, start_stamp, serial, script):
+        """The samples as CSV: a "# host_start" metadata row, the header (t, FIELDS, event), one row per sample."""
+        with open(path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", script])
+            w.writerow(["t"] + FIELDS + ["event"])
+            w.writerows(self.rows)
 
 
 def segment_summary(rows, name):
@@ -202,12 +218,7 @@ def main():
     current = ("closed_loop_entry", 0)  # (segment name, first row) of the segment in progress
     try:
         rec.event = "closed_loop_request"
-        b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
-        deadline = time.monotonic() + 1.0
-        while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
-            if time.monotonic() > deadline:
-                raise Abort("did not enter closed loop within 1 s")
-        rec.expect_closed_loop = True
+        rec.enter_closed_loop()
         home = b.get(ax.controller.input_pos)
         rec.event = "hold"
         i0 = len(rec.rows)
@@ -273,13 +284,8 @@ def main():
         print(f"  {segments[-1]['segment']}: " +
               ", ".join(f"{k}={v}" for k, v in segments[-1].items() if k != "segment"))
 
-    LOGS.mkdir(exist_ok=True)
-    stem = LOGS / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
-    with open(f"{stem}.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", "move_test.py"])
-        w.writerow(["t"] + FIELDS + ["event"])
-        w.writerows(rec.rows)
+    stem = logs_dir() / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
+    rec.write_csv(f"{stem}.csv", start_stamp, serial, "move_test.py")
     meta = {
         "host_start": start_stamp.isoformat(), "serial": serial, "argv": sys.argv[1:],
         "moves": moves, "expected_peak_vel": round(peak, 3), "runaway_guard_vel": round(rec.max_vel, 3),
@@ -288,11 +294,10 @@ def main():
         "samples": len(rec.rows), "rate_hz": round(len(rec.rows) / max(rec.rows[-1][0], 1e-9), 1) if rec.rows else 0,
     }
     pathlib.Path(f"{stem}.json").write_text(json.dumps(meta, indent=2) + "\n")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": start_stamp.isoformat(), "action": "move_test", "argv": sys.argv[1:],
-                            "abort_reason": abort_reason, "log": f"{stem.name}.csv"}) + "\n")
+    log_action({"t": start_stamp.isoformat(), "action": "move_test", "argv": sys.argv[1:],
+                "abort_reason": abort_reason, "log": f"{stem.name}.csv"})
 
-    print(f"\n{len(rec.rows)} samples ({meta['rate_hz']} Hz) -> {stem.relative_to(WORKDIR)}.csv/.json")
+    print(f"\n{len(rec.rows)} samples ({meta['rate_hz']} Hz) -> {rel(stem)}.csv/.json")
     print(f"Result: {'ABORTED: ' + abort_reason if abort_reason else 'completed'}; axis left IDLE; "
           f"RAM settings restored: {list(changed) or 'none changed'}")
     for name, d in final_errors.items():

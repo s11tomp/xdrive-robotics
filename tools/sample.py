@@ -12,17 +12,15 @@ import argparse
 import csv
 import datetime
 import math
-import pathlib
 import statistics as st
 import sys
 import time
 
+from logfiles import logs_dir, rel
 from xdrive import paths, usb
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 FIELDS = [
     "vbus_voltage",
@@ -69,8 +67,7 @@ def main():
     serial = format(b.get(odrv.serial_number), "X")
 
     stamp = datetime.datetime.now().astimezone()
-    LOGS.mkdir(exist_ok=True)
-    path = LOGS / f"{stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}.csv"
+    path = logs_dir() / f"{stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}.csv"
 
     rows = []
     t0 = time.monotonic()
@@ -86,7 +83,7 @@ def main():
 
     n = len(rows)
     col = {name: [r[i + 1] for r in rows] for i, name in enumerate(FIELDS)}
-    print(f"{n} samples in {args.duration:.1f} s ({n / args.duration:.0f} Hz) -> {path.relative_to(WORKDIR)}")
+    print(f"{n} samples in {args.duration:.1f} s ({n / args.duration:.0f} Hz) -> {rel(path)}")
     for name in ["vbus_voltage", "ibus", "axis0.motor.current_control.Iq_setpoint",
                  "axis0.motor.current_control.Iq_measured", "axis0.motor.current_control.Id_measured",
                  "axis0.encoder.vel_estimate", "axis0.controller.vel_integrator_torque",

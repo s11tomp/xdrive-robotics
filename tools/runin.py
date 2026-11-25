@@ -32,15 +32,13 @@ import time
 
 import numpy as np
 
-from move_test import CLOSED_LOOP, FIELDS, IX, Abort, Recorder, error_problems
-from xdrive import paths, usb
+from logfiles import log_action, logs_dir, rel
+from move_test import FIELDS, IX, Abort, Recorder, error_problems
+from xdrive import usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
-STOP = LOGS / "STOP"
 COLUMNS = ["t", "direction", "cruise_samples", "vel_mean", "Iq_mean_abs", "Iq_peak_abs", "ibus_mean", "vbus_mean",
            "fet_temp"]
 
@@ -92,9 +90,10 @@ def main():
     if problems:
         print("Not starting:\n  " + "\n  ".join(problems))
         return 2
-    if STOP.exists():
-        STOP.unlink()
-        print(f"removed a leftover {STOP.relative_to(WORKDIR)}")
+    stop_file = logs_dir() / "STOP"
+    if stop_file.exists():
+        stop_file.unlink()
+        print(f"removed a leftover {rel(stop_file)}")
 
     cfg = ax.controller.config
     orig_control_mode, orig_input_mode = b.get(cfg.control_mode), b.get(cfg.input_mode)
@@ -117,15 +116,10 @@ def main():
     seconds, abort_reason, direction = [], None, +1
     run_s = args.minutes * 60.0
     print(f"{args.speed:g} turn/s for {args.minutes:g} min, reversing every {args.reverse_every:g} s; "
-          f"stop: touch {STOP.relative_to(WORKDIR)}")
+          f"stop: touch {rel(stop_file)}")
     try:
         try:
-            b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
-            deadline = time.monotonic() + 1.0
-            while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
-                if time.monotonic() > deadline:
-                    raise Abort("did not enter closed loop within 1 s")
-            rec.expect_closed_loop = True
+            rec.enter_closed_loop()
             t_start = time.monotonic()
             b.set(ax.controller.input_vel, direction * args.speed)
             t_reverse, t_second, stall_since = t_start + args.reverse_every, t_start + 1.0, None
@@ -155,7 +149,7 @@ def main():
                         print(f"  t {s['t']:6.0f} s  dir {direction:+d}  cruise |Iq| "
                               f"{np.mean(recent) if recent else float('nan'):.3f} A (last 30 s)  "
                               f"ibus {s['ibus_mean']:.3f} A  FET {s['fet_temp']:.1f} °C", flush=True)
-                    if STOP.exists():
+                    if stop_file.exists():
                         raise Stop("stop file")
                     if now - t_start >= run_s:
                         raise Stop("completed")
@@ -206,8 +200,7 @@ def main():
                                    "fet_temp_max": max(x["fet_temp"] for x in chunk)})
     motor_turns = sum(abs(x["vel_mean"]) for x in seconds)
 
-    LOGS.mkdir(exist_ok=True)
-    stem = LOGS / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
+    stem = logs_dir() / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
     with open(f"{stem}.csv", "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", "runin.py"])
@@ -218,14 +211,13 @@ def main():
          "previous_values_restored": original,
          "seconds_run": len(seconds), "motor_turns": round(motor_turns, 1), "per_minute": per_minute,
          "abort_reason": abort_reason}, indent=2) + "\n")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": start_stamp.isoformat(), "action": "runin", "argv": sys.argv[1:],
-                            "seconds_run": len(seconds), "abort_reason": abort_reason,
-                            "log": f"{stem.name}.csv"}) + "\n")
+    log_action({"t": start_stamp.isoformat(), "action": "runin", "argv": sys.argv[1:],
+                "seconds_run": len(seconds), "abort_reason": abort_reason,
+                "log": f"{stem.name}.csv"})
     print("\nminute  dir   cruise |Iq|   FET max")
     for r in per_minute:
         print(f"  {r['minute']:4d}  {r['direction']:+d}   {r['Iq_mean_abs']:7.3f} A   {r['fet_temp_max']:5.1f} °C")
-    print(f"\n{len(seconds)} s, about {motor_turns:.0f} motor turns -> {stem.relative_to(WORKDIR)}.csv/.json")
+    print(f"\n{len(seconds)} s, about {motor_turns:.0f} motor turns -> {rel(stem)}.csv/.json")
     print(f"Result: {'STOPPED: ' + abort_reason if abort_reason else 'completed'}; axis left IDLE; "
           f"restored: {list(original)}")
     return 3 if abort_reason else 0

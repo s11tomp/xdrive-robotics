@@ -16,19 +16,17 @@ Usage (from the repo root):
 import argparse
 import datetime
 import json
-import pathlib
 import re
 import sys
 import time
 
 import numpy as np
 
+from logfiles import logs_dir, rel
 from xdrive import paths, usb
 from xdrive.enums import CaptureState, CaptureTrigger
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 CONTROL_HZ = 8000  # XDRIVE Mini / ODrive v3 control loop rate (TIM1 period 3500 counts, RCR 2, 168 MHz)
 MAX_CHANNELS = 8
 IDLE, ARMED, TRIGGERED, DONE = CaptureState.IDLE, CaptureState.ARMED, CaptureState.TRIGGERED, CaptureState.DONE
@@ -123,7 +121,7 @@ def capture(b, fields, decimation=1, trigger=None, post=None, timeout=10.0):
 
 def save(t, data, meta, serial, label):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    base = LOGS / f"{stamp}_{serial}_capture_{label}"
+    base = logs_dir() / f"{stamp}_{serial}_capture_{label}"
     cols = [t] + list(data.values())
     np.savetxt(base.with_suffix(".csv"), np.column_stack(cols), delimiter=",", fmt="%.9g",
                header=",".join(["t"] + list(data)), comments="")
@@ -152,7 +150,7 @@ def main():
     for f, x in data.items():
         x = x.astype(float)
         print(f"  {f:50s} mean {x.mean():+.5g}  std {x.std():.4g}  min {x.min():+.5g}  max {x.max():+.5g}")
-    print(f"-> {path.relative_to(WORKDIR)}")
+    print(f"-> {rel(path)}")
     return 0
 
 

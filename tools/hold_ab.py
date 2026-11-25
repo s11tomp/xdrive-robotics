@@ -13,7 +13,6 @@ Usage:
 Variant keys are move_test SETTINGS names (current_bw, enc_bw, vel_gain, vel_int_gain, pos_gain, ...).
 """
 import argparse
-import csv
 import datetime
 import json
 import pathlib
@@ -22,14 +21,13 @@ import time
 
 import numpy as np
 
-from move_test import CLOSED_LOOP, FIELDS, IX, SETTINGS, Abort, Recorder, error_problems
+from logfiles import log_action, logs_dir, rel
+from move_test import FIELDS, IX, SETTINGS, Abort, Recorder, error_problems
 from xdrive import paths, usb
 from xdrive.enums import AxisState
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 
 def parse_variant(text):
@@ -95,12 +93,7 @@ def main():
             for k, v in settings.items():
                 paths.set(b, SETTINGS[k], v)
             rec.event = f"enter {label}"
-            b.set(ax.requested_state, AxisState.CLOSED_LOOP_CONTROL)
-            deadline = time.monotonic() + 1.0
-            while rec.sample()[1 + IX["axis0.current_state"]] != CLOSED_LOOP:
-                if time.monotonic() > deadline:
-                    raise Abort("did not enter closed loop within 1 s")
-            rec.expect_closed_loop = True
+            rec.enter_closed_loop()
             rec.run_for(0.5)                            # let the integrator settle before measuring
             rec.event = f"variant {label}"
             i0 = len(rec.rows)
@@ -126,20 +119,14 @@ def main():
         except Exception as ex:
             print(f"Restore failed: {ex!r}")
 
-    LOGS.mkdir(exist_ok=True)
-    stem = LOGS / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
-    with open(f"{stem}.csv", "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["# host_start", start_stamp.isoformat(), "serial", serial, "script", "hold_ab.py"])
-        w.writerow(["t"] + FIELDS + ["event"])
-        w.writerows(rec.rows)
+    stem = logs_dir() / f"{start_stamp:%Y%m%d-%H%M%S}_{serial}_{args.label}"
+    rec.write_csv(f"{stem}.csv", start_stamp, serial, "hold_ab.py")
     pathlib.Path(f"{stem}.json").write_text(json.dumps(
         {"host_start": start_stamp.isoformat(), "serial": serial, "argv": sys.argv[1:], "original": original,
          "results": results, "abort_reason": abort_reason}, indent=2) + "\n")
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": start_stamp.isoformat(), "action": "hold_ab", "argv": sys.argv[1:],
-                            "abort_reason": abort_reason, "log": f"{stem.name}.csv"}) + "\n")
-    print(f"\n-> {stem.relative_to(WORKDIR)}.csv/.json")
+    log_action({"t": start_stamp.isoformat(), "action": "hold_ab", "argv": sys.argv[1:],
+                "abort_reason": abort_reason, "log": f"{stem.name}.csv"})
+    print(f"\n-> {rel(stem)}.csv/.json")
     print(f"Result: {'ABORTED: ' + abort_reason if abort_reason else 'completed'}; axis left IDLE; "
           f"restored: {list(original)}")
     return 3 if abort_reason else 0

@@ -11,7 +11,7 @@ by cogging (36x and 42x per turn on the 10018: 36 slots, 42 magnets). That is no
 in the table it becomes a false ±4-9 deg electrical commutation error. The magnet-placement error
 is low order (1x, 2x, 4x, 8x).
 
-Writes are RAM only; save with set_config.py --save (v0.5.6 reboots). Logged to logs/actions.jsonl.
+Writes are RAM only; save with set_config.py --save (the board saves and reboots). Logged to logs/actions.jsonl.
 Usage (from the repo root): python tools/correction_table.py --smooth 12
 """
 import argparse
@@ -21,12 +21,11 @@ import math
 import pathlib
 import sys
 
+from logfiles import log_action, logs_dir, rel
 from xdrive import usb
 from xdrive.board import Board
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 N = 256
 
 
@@ -90,14 +89,13 @@ def main() -> int:
     if args.save_json:
         pathlib.Path(args.save_json).write_text(json.dumps({"serial": serial, "table_counts": table}, indent=2) + "\n")
         print(f"saved -> {args.save_json}")
-    LOGS.mkdir(exist_ok=True)
     if args.smooth:
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        before = LOGS / f"{stamp}_{serial}_correction-table-before-smooth.json"
+        before = logs_dir() / f"{stamp}_{serial}_correction-table-before-smooth.json"
         before.write_text(json.dumps({"serial": serial, "table_counts": table}, indent=2) + "\n")
         new = smooth(new or table, args.smooth)
-        rec["before"] = str(before.relative_to(WORKDIR))
-        print(f"\nsmoothed to harmonics 1..{args.smooth} (original kept in {before.relative_to(WORKDIR)}):")
+        rec["before"] = rel(before)
+        print(f"\nsmoothed to harmonics 1..{args.smooth} (original kept in {rel(before)}):")
     if new is not None:
         for i, v in enumerate(new):
             board.call(enc.set_correction(index=i, val=float(v)))
@@ -107,8 +105,7 @@ def main() -> int:
         show(back, cpr)
         print("written to the board (RAM only).")
         rec["written_rms_counts"] = rms(back)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps(rec) + "\n")
+    log_action(rec)
     board.close()
     return 0
 

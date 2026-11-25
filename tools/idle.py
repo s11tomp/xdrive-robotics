@@ -7,18 +7,15 @@ or save anything. Each call is appended to logs/actions.jsonl.
 Usage:  python tools/idle.py
 """
 import datetime
-import json
-import pathlib
 import sys
 import time
 
+from logfiles import log_action
 from xdrive import report, usb
 from xdrive.enums import AxisState
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 
 def main() -> int:
@@ -38,11 +35,9 @@ def main() -> int:
     print(f"state {before.name} -> {after.name}")
     for k, v in errs.items():
         print(f"  {k:10s} {report.line(v)}")
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": datetime.datetime.now().astimezone().isoformat(), "action": "idle",
-                            "serial": serial, "state_before": before.value, "state_after": after.value,
-                            "errors": {k: report.jsonable(v) for k, v in errs.items()}}) + "\n")
+    log_action({"t": datetime.datetime.now().astimezone().isoformat(), "action": "idle",
+                "serial": serial, "state_before": before.value, "state_after": after.value,
+                "errors": {k: report.jsonable(v) for k, v in errs.items()}})
     return 0 if after is AxisState.IDLE else 2
 
 

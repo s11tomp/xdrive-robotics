@@ -28,9 +28,9 @@ import subprocess
 import sys
 import tempfile
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
-BACKUPS = WORKDIR / "backups"
+from logfiles import log_action, rel
+
+BACKUPS = pathlib.Path.cwd() / "backups"
 
 FLASH_BASE = 0x08000000
 NVM_START = 0x080C0000          # ODrive config lives in sectors 10-11 (0x080C0000, 0x080E0000)
@@ -45,7 +45,7 @@ OPENOCD_BASE = [
     "openocd",
     "-f", "interface/stlink.cfg",
     "-f", "target/stm32f4x.cfg",
-    "-c", "adapter speed 1000",       # conservative; the stand has motor noise
+    "-c", "adapter speed 1000",       # conservative: the link runs next to a motor drive
     "-c", "reset_config none",        # never touch NRST, never sysresetreq
     "-c", "init",
 ]
@@ -141,20 +141,18 @@ def main():
             if len(flash) != size or flash != second.read_bytes():
                 print("FAIL: the two flash reads differ (or are short). Check wiring/ground; try again.")
                 return 3
-        record["dir"] = str(outdir.relative_to(WORKDIR))
+        record["dir"] = rel(outdir)
         record["sha256"] = {f.name: sha256(f) for f in sorted(outdir.glob("*.bin"))}
         fw_end = NVM_START - FLASH_BASE
         used = len(flash[:fw_end].rstrip(b"\xff"))
         record["firmware_bytes_used"] = used
         (outdir / "manifest.json").write_text(json.dumps(record, indent=2) + "\n")
-        print(f"Saved to {outdir.relative_to(WORKDIR)}/  (both reads identical)")
+        print(f"Saved to {rel(outdir)}/  (both reads identical)")
         print(f"  firmware region uses {used} bytes (0x{FLASH_BASE:08X}..0x{FLASH_BASE + used:08X})")
         for k, v in record["sha256"].items():
             print(f"  sha256 {k}: {v}")
 
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps(record) + "\n")
+    log_action(record)
     return 0
 
 

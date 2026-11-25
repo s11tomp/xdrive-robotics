@@ -10,19 +10,16 @@ Usage:  python tools/reboot_watch.py [--timeout 40]
 """
 import argparse
 import datetime
-import json
 import math
-import pathlib
 import sys
 import time
 
+from logfiles import log_action
 from xdrive import report, usb
 from xdrive.enums import AxisState
 from xdrive.errors import LinkError
 from xdrive.props import odrv
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
 
 
 def main():
@@ -79,9 +76,7 @@ def main():
           f"trap vel {trap_vel:.1f}")
     for k, v in errs.items():
         print(f"  {k:10s} {report.line(v)}")
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps({"t": t_req.isoformat(), "action": "reboot", "serial": serial, **result}) + "\n")
+    log_action({"t": t_req.isoformat(), "action": "reboot", "serial": serial, **result})
     return 0 if last is AxisState.CLOSED_LOOP_CONTROL else 2
 
 

@@ -34,12 +34,12 @@ import sys
 import tempfile
 import time
 
+from logfiles import log_action, rel
+from seal_image import load_segments as elf_segments
 from swd_backup import FLASH_BASE, NVM_START, probe, openocd as openocd_readonly
 from xdrive.boot_frame import APP_START, BOOTLOADER_MAGIC, HEADER_OFFSET
 
-WORKDIR = pathlib.Path.cwd()  # logs/, backups/ and configs/ go under the working directory
-LOGS = WORKDIR / "logs"
-BACKUPS = WORKDIR / "backups"
+BACKUPS = pathlib.Path.cwd() / "backups"
 
 # STM32F405: 4 x 16 KB, 1 x 64 KB, 7 x 128 KB.
 SECTORS = [(0x08000000 + o, s) for o, s in
@@ -59,27 +59,32 @@ def load_segments(args):
         return [(FLASH_BASE, data)], pathlib.Path(args.bin)
     path = pathlib.Path(args.elf)
     raw = path.read_bytes()
-    if raw[:4] != b"\x7fELF" or raw[4] != 1 or raw[5] != 1:
-        raise SystemExit(f"{path} is not a 32-bit little-endian ELF")
-    e_phoff, = struct.unpack_from("<I", raw, 0x1C)
-    e_phentsize, e_phnum = struct.unpack_from("<HH", raw, 0x2A)
     segs = []
-    for i in range(e_phnum):
-        p_type, p_offset, _vaddr, p_paddr, p_filesz = struct.unpack_from("<IIIII", raw, e_phoff + i * e_phentsize)
-        if p_type == 1 and p_filesz:                       # PT_LOAD with file data -> goes to flash at LMA
-            if not (FLASH_BASE <= p_paddr and p_paddr + p_filesz <= FLASH_BASE + 0x100000):
-                raise SystemExit(f"segment at 0x{p_paddr:08X} is outside flash")
-            segs.append((p_paddr, raw[p_offset:p_offset + p_filesz]))
+    for addr, offset, size in elf_segments(raw):
+        if not (FLASH_BASE <= addr and addr + size <= FLASH_BASE + 0x100000):
+            raise SystemExit(f"segment at 0x{addr:08X} is outside flash")
+        segs.append((addr, raw[offset:offset + size]))
     if not segs:
         raise SystemExit("no loadable segments in the ELF")
-    return sorted(segs), path
+    return segs, path
+
+
+def describe_image(segs, path, touched):
+    """Prints the image's segments and the sectors a write erases."""
+    print(f"Image {path}: {len(segs)} segment(s), {sum(len(d) for _, d in segs)} bytes, "
+          f"sha256 {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}…")
+    for a, d in segs:
+        print(f"  0x{a:08X}..0x{a + len(d):08X} ({len(d)} B)")
+    print("Sectors a write erases: " + ", ".join(f"{SECTORS.index(t)} (0x{t[0]:08X})" for t in touched))
+    if any(a + s > NVM_START for a, s in touched):
+        print("NOTE: the image covers the config sectors (10-11): the board's saved config gets replaced too.")
 
 
 def sectors_touched(segs):
     return [(a, s) for a, s in SECTORS if any(sa < a + s and a < sa + len(d) for sa, d in segs)]
 
 
-def full_dump(tag):
+def full_dump():
     """Read the whole flash twice (read-only, target keeps running); return (bytes, saved path)."""
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     with tempfile.TemporaryDirectory() as td:
@@ -126,14 +131,14 @@ def save_backup(data, serial, stamp, reason):
     sha = hashlib.sha256(data).hexdigest()
     same = [p for p in sorted(BACKUPS.glob("*/flash.bin")) if hashlib.sha256(p.read_bytes()).hexdigest() == sha]
     if same:
-        print(f"  identical to the existing backup {same[0].parent.relative_to(WORKDIR)}/ (sha256 {sha[:16]}…), not saved again")
+        print(f"  identical to the existing backup {rel(same[0].parent)}/ (sha256 {sha[:16]}…), not saved again")
         return same[0].parent
     outdir = BACKUPS / f"{stamp}_{serial}_pre-flash"
     outdir.mkdir(parents=True)
     (outdir / "flash.bin").write_bytes(data)
     (outdir / "manifest.json").write_text(json.dumps({"t": stamp, "serial": serial, "reason": reason,
                                                       "sha256": {"flash.bin": sha}}, indent=2) + "\n")
-    print(f"  saved {outdir.relative_to(WORKDIR)}/flash.bin (sha256 {sha[:16]}…)")
+    print(f"  saved {rel(outdir)}/flash.bin (sha256 {sha[:16]}…)")
     return outdir
 
 
@@ -167,12 +172,6 @@ def board_on_usb():
         return format(b.get(odrv.serial_number), "X"), b.get(odrv.axis0.current_state).value
 
 
-def log(record):
-    LOGS.mkdir(exist_ok=True)
-    with (LOGS / "actions.jsonl").open("a") as f:
-        f.write(json.dumps(record) + "\n")
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = ap.add_mutually_exclusive_group(required=True)
@@ -185,12 +184,7 @@ def main():
     segs, path = load_segments(args)
     total = sum(len(d) for _, d in segs)
     touched = sectors_touched(segs)
-    print(f"Image {path}: {len(segs)} segment(s), {total} bytes, sha256 {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}…")
-    for a, d in segs:
-        print(f"  0x{a:08X}..0x{a + len(d):08X} ({len(d)} B)")
-    print("Sectors a write erases: " + ", ".join(f"{SECTORS.index(t)} (0x{t[0]:08X})" for t in touched))
-    if any(a + s > NVM_START for a, s in touched):
-        print("NOTE: the image covers the config sectors (10-11): the board's saved config gets replaced too.")
+    describe_image(segs, path, touched)
 
     # 1. Identify over SWD.
     info, _ = probe()
@@ -214,7 +208,7 @@ def main():
 
     # 3. Pre-flash backup.
     print("Pre-flash backup: reading the whole flash twice...")
-    pre, stamp = full_dump("pre")
+    pre, stamp = full_dump()
     pre_sha = hashlib.sha256(pre).hexdigest()
     outdir = save_backup(pre, info["serial"], stamp, f"before flashing {path}")
 
@@ -224,18 +218,18 @@ def main():
         print(note)
     if refusal:
         print(f"REFUSED: {refusal}. Nothing written.")
-        log({"t": datetime.datetime.now().astimezone().isoformat(), "action": "swd_flash_refused", "image": str(path),
+        log_action({"t": datetime.datetime.now().astimezone().isoformat(), "action": "swd_flash_refused", "image": str(path),
              "serial": info["serial"], "reason": refusal})
         return 5
     before = compare(segs, pre)
     print(f"Image vs chip now: {before} of {total} bytes differ" + ("  (the chip already holds this image)" if before == 0 else ""))
     record = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "swd_flash" if args.write else "swd_flash_dry_run",
               "image": str(path), "image_sha256": hashlib.sha256(path.read_bytes()).hexdigest(), "image_bytes": total,
-              "serial": info["serial"], "pre_flash_backup": str(outdir.relative_to(WORKDIR)), "pre_sha256": pre_sha,
+              "serial": info["serial"], "pre_flash_backup": rel(outdir), "pre_sha256": pre_sha,
               "bytes_differing_before": before, "sectors": [SECTORS.index(t) for t in touched]}
     if not args.write:
         print("Dry run: nothing written. Add --write to flash.")
-        log(record)
+        log_action(record)
         return 0
 
     # 5. Program.
@@ -253,21 +247,21 @@ def main():
     print("\n".join("  " + ln for ln in out.strip().splitlines()[-8:]))
     if p.returncode != 0 or "verified" not in out:
         record["result"] = "FAILED"
-        log(record)
-        print(f"FLASH FAILED (exit {p.returncode}). Restore with:\n  python tools/swd_flash.py --bin {outdir.relative_to(WORKDIR)}/flash.bin --write")
+        log_action(record)
+        print(f"FLASH FAILED (exit {p.returncode}). Restore with:\n  python tools/swd_flash.py --bin {rel(outdir)}/flash.bin --write")
         return 3
     print(f"  done in {time.time() - t0:.1f} s. The board is rebooting: startup calibration moves the motor.")
 
     # 6. Read back.
     time.sleep(2)
     print("Read-back: reading the whole flash twice...")
-    post, _ = full_dump("post")
+    post, _ = full_dump()
     record.update(readback_check(segs, touched, pre, post))
     img_diffs, outside_changed, stray = (record[k] for k in ("image_bytes_wrong_after", "untouched_sectors_changed_bytes",
                                                              "erased_not_programmed_non_ff"))
     ok = img_diffs == 0 and outside_changed == 0 and stray == 0
     record["result"] = "OK" if ok else "READBACK MISMATCH"
-    log(record)
+    log_action(record)
     print(f"  image bytes wrong: {img_diffs}; changed bytes outside erased sectors: {outside_changed}; "
           f"non-FF bytes in erased-but-unprogrammed areas: {stray}")
     print(f"  whole flash identical to the pre-flash backup: {record['whole_flash_identical_to_before']}")

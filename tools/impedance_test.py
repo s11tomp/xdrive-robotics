@@ -15,16 +15,16 @@ RAM-only settings, restored at the end; ends IDLE. Logs: logs/<stamp>_<serial>_i
 
 Usage (from the repo root):  python tools/impedance_test.py
 """
+import argparse
 import datetime
-import json
 import math
 import sys
-import time
 
+from logfiles import rel
 from xdrive import usb
 from xdrive.props import odrv
 
-from safety_test import CLOSED_LOOP, DECEL_HOLD, IDLE, LOGS, PASSTHROUGH, WORKDIR, SETTINGS, TRAP, Bench, Unexpected
+from safety_test import CLOSED_LOOP, DECEL_HOLD, IDLE, PASSTHROUGH, SETTINGS, TRAP, Bench, Unexpected
 
 IMPEDANCE = 4  # ControlMode
 POS = "axis0.encoder.pos_estimate"
@@ -146,6 +146,7 @@ def test_impedance(b):
 
 
 def main():
+    argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter).parse_args()
     board = usb.connect()
     serial = format(board.get(odrv.serial_number), "X")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -155,31 +156,13 @@ def main():
     try:
         b.set("axis0.requested_state", IDLE)
         b.idle_and_settle()
-        logs.append(str(test_impedance(b).relative_to(WORKDIR)))
+        logs.append(rel(test_impedance(b)))
     except (Unexpected, KeyboardInterrupt) as ex:
         abort = repr(ex)
         print(f"ABORT: {abort}")
     finally:
-        try:
-            b.set("axis0.requested_state", IDLE)
-            b.set("axis0.config.enable_watchdog", False)
-            t = time.monotonic()
-            while abs(b.get("axis0.encoder.vel_estimate")) > 0.5 and time.monotonic() - t < 20:
-                time.sleep(0.05)
-            gains(b, 0.0, 0.0)
-            for p, val in saved.items():
-                b.set(p, val)
-            if b.rows:
-                logs.append(str(b.log("abort").relative_to(WORKDIR)))
-        except Exception as ex:  # USB gone: the only stop left is the PSU
-            print(f"!!! Post-run IDLE/restore failed ({ex!r}). Press OUT on the PSU if the motor is driven.")
-    out = {"t": datetime.datetime.now().astimezone().isoformat(), "serial": serial, "abort": abort,
-           "checks": b.checks, "logs": logs}
-    path = LOGS / f"{stamp}_{serial}_impedance-test.json"
-    path.write_text(json.dumps(out, indent=2) + "\n")
-    failed = [c for c in b.checks if not c["ok"]]
-    print(f"{len(b.checks) - len(failed)}/{len(b.checks)} checks passed; axis IDLE; settings restored -> {path.relative_to(WORKDIR)}")
-    return 1 if failed or abort else 0
+        b.restore(saved, logs, cleanup=lambda: gains(b, 0.0, 0.0))
+    return b.report("impedance-test", abort, logs)
 
 
 if __name__ == "__main__":

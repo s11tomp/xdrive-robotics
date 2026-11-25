@@ -32,13 +32,14 @@ from typing import Any
 import usb.core
 import usb.util
 
+from logfiles import log_action, rel
 from xdrive import usb as xusb
 from xdrive.board import Board
 from xdrive.enums import AxisState
 from xdrive.errors import LinkError, LinkLost, LinkTimeout
 from xdrive.props import odrv
-from swd_backup import FLASH_BASE, NVM_START
-from swd_flash import (WORKDIR, SECTORS, bootloader_check, compare, load_segments, log, readback_check, save_backup,
+from swd_backup import FLASH_BASE
+from swd_flash import (SECTORS, bootloader_check, compare, describe_image, load_segments, readback_check, save_backup,
                        sectors_touched)
 
 VID, PID = 0x0483, 0xDF11  # STM32 system bootloader in DFU mode
@@ -218,12 +219,7 @@ def main():
     segs, path = load_segments(args)
     total = sum(len(d) for _, d in segs)
     touched = sectors_touched(segs)
-    print(f"Image {path}: {len(segs)} segment(s), {total} bytes, sha256 {hashlib.sha256(path.read_bytes()).hexdigest()[:16]}…")
-    for a, d in segs:
-        print(f"  0x{a:08X}..0x{a + len(d):08X} ({len(d)} B)")
-    print("Sectors a write erases: " + ", ".join(f"{SECTORS.index(t)} (0x{t[0]:08X})" for t in touched))
-    if any(a + s > NVM_START for a, s in touched):
-        print("NOTE: the image covers the config sectors (10-11): the board's saved config gets replaced too.")
+    describe_image(segs, path, touched)
 
     # 1. Find the board.
     record: dict[str, Any] = {"t": datetime.datetime.now().astimezone().isoformat(), "action": "usb_flash" if args.write else "usb_flash_dry_run",
@@ -251,7 +247,7 @@ def main():
     print(f"  {2 * FLASH_SIZE / (time.monotonic() - t1) / 1024:.0f} KiB/s")
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     outdir = save_backup(pre, serial, stamp, f"before flashing {path} over USB DFU")
-    record.update(pre_flash_backup=str(outdir.relative_to(WORKDIR)), pre_sha256=hashlib.sha256(pre).hexdigest())
+    record.update(pre_flash_backup=rel(outdir), pre_sha256=hashlib.sha256(pre).hexdigest())
 
     # 3. Compare.
     refusal, note = bootloader_check(segs, pre)
@@ -284,9 +280,9 @@ def main():
               f"{record['erased_not_programmed_non_ff']}")
         if not ok:
             record["result"] = "READBACK MISMATCH"
-            log(record)
+            log_action(record)
             print(f"RESULT: READ-BACK MISMATCH. The board stays in DFU mode. Restore with:\n"
-                  f"  python tools/usb_flash.py --bin {outdir.relative_to(WORKDIR)}/flash.bin --write")
+                  f"  python tools/usb_flash.py --bin {rel(outdir)}/flash.bin --write")
             return 4
     else:
         print("Dry run: nothing written.")
@@ -299,7 +295,7 @@ def main():
     errors = [k for k in ("odrv_error", "axis_error", "motor_error", "encoder_error") if record.get(k)]
     ok = record["back_on_usb"] and not errors
     record["result"] = "REFUSED" if refusal else "OK" if ok else "BOARD NOT BACK CLEANLY"
-    log(record)
+    log_action(record)
     if record["back_on_usb"]:
         print(f"  back on USB: fw {record['fw_version']}, axis0 state {record['axis_state']}, "
               f"errors {({k: record[k] for k in errors}) or 'none'}; {record['total_s']} s in all")

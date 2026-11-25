@@ -11,21 +11,23 @@ measured-current spike investigation); 0 of 7 without it.
 
 Usage (from the repo root):  python tools/brake_check.py <label>
 """
+import argparse
 import csv
 import datetime
-import pathlib
 import sys
 import time
 
+from logfiles import logs_dir
 from xdrive import paths, usb
 from xdrive.enums import AxisState, ControlMode, InputMode
 from xdrive.props import odrv
 
-LOGS = pathlib.Path.cwd() / "logs"
 
 
 def main():
-    label = sys.argv[1] if len(sys.argv) > 1 else "run"
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("label", nargs="?", default="run", help="suffix for the log file name")
+    label = ap.parse_args().label
     b = usb.connect()
     a = odrv.axis0
     c, tt = a.controller, a.trap_traj.config
@@ -76,7 +78,7 @@ def main():
     serial = format(b.get(odrv.serial_number), "X")
     b.close()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    path = LOGS / f"{stamp}_{serial}_brake-check-{label}.csv"
+    path = logs_dir() / f"{stamp}_{serial}_brake-check-{label}.csv"
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(["t", "vbus", "ibus", "brake_current", "vel", "Iq_meas", "spike_count", "state", "axis_error", "event"])

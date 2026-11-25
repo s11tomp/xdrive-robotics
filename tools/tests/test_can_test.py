@@ -71,9 +71,7 @@ def board(json_bytes: bytes) -> Iterator[tuple[str, FakeCanBoard]]:  # noqa: F81
 def test_full_run_against_a_fake_board(board: tuple[str, FakeCanBoard], tmp_path: pathlib.Path,
                                        monkeypatch: pytest.MonkeyPatch) -> None:
     channel, fake = board
-    (tmp_path / "logs").mkdir()
-    monkeypatch.setattr(can_test, "WORKDIR", tmp_path)
-    monkeypatch.setattr(can_test, "LOGS", tmp_path / "logs")
+    monkeypatch.chdir(tmp_path)
 
     code = can_test.main(["--interface", "virtual", "--channel", channel, "--rate", "100",
                           "--tests", "endpoint,save,impedance,latency,load"])
@@ -104,9 +102,7 @@ def test_full_run_against_a_fake_board(board: tuple[str, FakeCanBoard], tmp_path
 
 
 def test_silent_bus_aborts_with_a_hint(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    (tmp_path / "logs").mkdir()
-    monkeypatch.setattr(can_test, "WORKDIR", tmp_path)
-    monkeypatch.setattr(can_test, "LOGS", tmp_path / "logs")
+    monkeypatch.chdir(tmp_path)
     code = can_test.main(["--interface", "virtual", "--channel", f"can-test-{uuid.uuid4()}"])
     out = json.loads(next((tmp_path / "logs").glob("*_can-test.json")).read_text())
     assert code == 1 and "no heartbeat heard" in out["abort"]

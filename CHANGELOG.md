@@ -2,7 +2,7 @@
 
 This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions this firmware builds on. Each release's section (`## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`) becomes the notes of its GitHub release; changes not yet released collect under the next version, dated `Unreleased`.
 
-## xdrive-robotics [1.0.0] - Unreleased
+## xdrive-robotics [1.0.0] - 2026-11-24
 
 The first release: ODrive v0.5.6 for the MKS XDRIVE Mini, with the host tools that flash, configure and test it. This section lists the differences from ODrive v0.5.6. A board's first flash is `xdrive-robotics-1.0.0-with-bootloader.bin` (the CAN bootloader and the firmware); flashing it over Makerbase's v0.5.1 firmware resets the board's config (`docs/migrating-from-stock.md`).
 

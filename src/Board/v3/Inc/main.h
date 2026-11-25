@@ -75,8 +75,6 @@
 #define M0_nCS_GPIO_Port GPIOC
 #define M1_nCS_Pin GPIO_PIN_14
 #define M1_nCS_GPIO_Port GPIOC
-#define M1_ENC_Z_Pin GPIO_PIN_15
-#define M1_ENC_Z_GPIO_Port GPIOC
 #define M0_IB_Pin GPIO_PIN_0
 #define M0_IB_GPIO_Port GPIOC
 #define M0_IC_Pin GPIO_PIN_1
@@ -147,10 +145,6 @@
 #define M0_ENC_A_GPIO_Port GPIOB
 #define M0_ENC_B_Pin GPIO_PIN_5
 #define M0_ENC_B_GPIO_Port GPIOB
-#define M1_ENC_A_Pin GPIO_PIN_6
-#define M1_ENC_A_GPIO_Port GPIOB
-#define M1_ENC_B_Pin GPIO_PIN_7
-#define M1_ENC_B_GPIO_Port GPIOB
 
 /* ########################## Assert Selection ############################## */
 /**

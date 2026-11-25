@@ -1,8 +1,7 @@
 /*
 * The ASCII protocol is a simpler, human readable alternative to the main native
 * protocol.
-* In the future this protocol might be extended to support selected GCode commands.
-* For a list of supported commands see doc/ascii-protocol.md
+* ODrive v0.5.6's documentation lists the supported commands.
 */
 
 /* Includes ------------------------------------------------------------------*/

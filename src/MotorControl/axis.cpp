@@ -176,7 +176,7 @@ bool Axis::watchdog_check() {
         watchdog_current_value_--;
         return true;
     }
-    // DECEL_HOLD needs an armed closed loop and a position estimate; anything else disarms as stock does.
+    // DECEL_HOLD needs an armed closed loop and a position estimate; anything else disarms the axis.
     if (config_.watchdog_action == WATCHDOG_ACTION_DECEL_HOLD
             && current_state_ == AXIS_STATE_CLOSED_LOOP_CONTROL && motor_.is_armed_
             && controller_.enter_timeout()) {

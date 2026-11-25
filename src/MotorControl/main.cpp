@@ -240,7 +240,6 @@ bool ODrive::enter_can_bootloader() {
     h->baud_rate = can_.config_.baud_rate;
     h->check = boot_handoff_check(h);
     NVIC_SystemReset();
-    return false;
 }
 
 bool ODrive::any_error() {

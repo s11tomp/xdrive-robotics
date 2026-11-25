@@ -52,7 +52,7 @@ public:
                                                 // even parity); an AS5047U has no parity bit, so off by default.
         // XDRIVE: per-angle correction of an absolute encoder.
         bool correction_enabled = false;              // add correction_table to the raw absolute position
-        std::array<float, 256> correction_table = {}; // [counts] correction at the centre of each 1/256-turn bin
+        std::array<float, 256> correction_table = {}; // [counts] correction at the center of each 1/256-turn bin
         float correction_scan_turns = 1.0f;           // mechanical turns each way in ENCODER_CORRECTION_CALIBRATION
         uint8_t correction_max_harmonic = 12;         // keep harmonics 1..N per turn of the measured error (0 = raw bins).
                                                       // Higher orders are cogging pulling the rotor off the field during
@@ -133,7 +133,6 @@ public:
     uint32_t abs_spi_good_frames_ = 0;      // accepted samples; the jump filter waits for 16 (boot garbage)
     uint16_t spi_last_frame_ = 0;           // last raw AMS frame
     uint8_t abs_spi_jumps_in_row_ = 0;
-    bool abs_spi_have_last_ = false;
     // XDRIVE: encoder correction table.
     int32_t pos_abs_raw_ = 0;            // last good raw absolute position, before correction
     bool correction_active_ = true;      // cleared while the correction calibration runs

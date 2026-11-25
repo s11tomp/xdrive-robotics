@@ -234,6 +234,18 @@ void start_general_purpose_adc() {
     __HAL_ADC_DISABLE_IT(&hadc1, ADC_IT_OVR);
 }
 
+// XDRIVE diagnostics: stops or restarts ADC1's continuous regular scan without disabling the ADC, so the
+// timer-triggered injected bus-voltage conversion keeps running. With CONT cleared the ADC finishes
+// the current sequence and stops; the circular DMA stays armed for the restart.
+void set_adc1_scan(bool enable) {
+    if (enable) {
+        ADC1->CR2 |= ADC_CR2_CONT;
+        ADC1->CR2 |= ADC_CR2_SWSTART;
+    } else {
+        ADC1->CR2 &= ~ADC_CR2_CONT;
+    }
+}
+
 // @brief Returns the ADC voltage associated with the specified pin.
 // This only works if the GPIO was not used for anything else since bootup, otherwise
 // it must be put to analog mode first.
@@ -251,18 +263,6 @@ void start_general_purpose_adc() {
 //  21000kHz / (15+26) / 16 = 32kHz
 // The true frequency is slightly lower because of the injected vbus
 // measurements
-// XDRIVE diagnostics: stop/restart ADC1's continuous regular scan without disabling the ADC, so the
-// timer-triggered injected bus-voltage conversion keeps running. With CONT cleared the ADC finishes
-// the current sequence and stops; the circular DMA stays armed for the restart.
-void set_adc1_scan(bool enable) {
-    if (enable) {
-        ADC1->CR2 |= ADC_CR2_CONT;
-        ADC1->CR2 |= ADC_CR2_SWSTART;
-    } else {
-        ADC1->CR2 &= ~ADC_CR2_CONT;
-    }
-}
-
 float get_adc_voltage(Stm32Gpio gpio) {
     return get_adc_relative_voltage(gpio) * adc_ref_voltage;
 }

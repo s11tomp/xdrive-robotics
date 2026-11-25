@@ -83,8 +83,6 @@ __attribute__((section(".noinit"))) volatile uint32_t jump_request;
 [[noreturn]] void request_app_start() {
     jump_request = JUMP_MAGIC;
     NVIC_SystemReset();
-    for (;;) {
-    }
 }
 
 uint32_t elapsed_ms(uint32_t start_cycles) {

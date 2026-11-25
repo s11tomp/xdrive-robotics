@@ -1,5 +1,6 @@
 
 #include "odrive_main.h"
+#include "encoder_correction.hpp"
 #include <Drivers/STM32/stm32_system.h>
 #include <bitset>
 
@@ -463,7 +464,7 @@ bool Encoder::run_offset_calibration() {
 }
 
 // XDRIVE: correction table lookup. Entry k is the correction at
-// the centre of bin k, i.e. at raw = (k + 0.5) * cpr / 256; linear interpolation, circular.
+// the center of bin k, i.e. at raw = (k + 0.5) * cpr / 256; linear interpolation, circular.
 float Encoder::correction_at(int32_t raw) const {
     float x = (float)raw * (256.0f / (float)config_.cpr) - 0.5f;
     int32_t k0 = (int32_t)floorf(x);
@@ -576,26 +577,8 @@ bool Encoder::run_correction_calibration() {
     }
     mean /= 256.0f;
     for (int k = 0; k < 256; ++k) e[k] -= mean;
-    // Keep harmonics 1..correction_max_harmonic per turn (DFT over the bin centres, then rebuild).
-    const int hmax = std::min<int>(config_.correction_max_harmonic, 127);
-    if (hmax > 0) {
-        for (int k = 0; k < 256; ++k) smooth[k] = 0.0f;
-        for (int h = 1; h <= hmax; ++h) {
-            float c = 0.0f, s = 0.0f;
-            for (int k = 0; k < 256; ++k) {
-                float a = 2.0f * M_PI * (float)h * ((float)k + 0.5f) / 256.0f;
-                c += e[k] * our_arm_cos_f32(a);
-                s += e[k] * our_arm_sin_f32(a);
-            }
-            c *= 2.0f / 256.0f;
-            s *= 2.0f / 256.0f;
-            for (int k = 0; k < 256; ++k) {
-                float a = 2.0f * M_PI * (float)h * ((float)k + 0.5f) / 256.0f;
-                smooth[k] += c * our_arm_cos_f32(a) + s * our_arm_sin_f32(a);
-            }
-        }
-        for (int k = 0; k < 256; ++k) e[k] = smooth[k];
-    }
+    // Keep harmonics 1..correction_max_harmonic per turn.
+    encoder_correction::keep_harmonics(e, std::min<int>(config_.correction_max_harmonic, 127), smooth);
     float ss = 0.0f, pk = 0.0f;
     for (int k = 0; k < 256; ++k) {
         ss += e[k] * e[k];
@@ -715,10 +698,10 @@ void Encoder::abs_spi_cb(bool success) {
     switch (mode_) {
         case MODE_SPI_ABS_AMS: {
             uint16_t rawVal = abs_spi_dma_rx_[0];
-            // XDRIVE: no parity check. The AS5047U's 16-bit frame has no parity bit (bit 15 is a
-            // warning flag), so ODrive's parity check rejected about half of the frames; Makerbase
-            // disabled it. Count the flags instead, and optionally drop frames with the error flag
-            // (sticky until ERRFL is read, so off by default).
+            // XDRIVE: the parity check is optional. The AS5047U's 16-bit frame has no parity bit
+            // (bit 15 is a warning flag), so a parity check rejects about half of its frames. Both
+            // flags are counted; frames with the error flag are dropped only on request (the flag
+            // is sticky until ERRFL is read, so off by default).
             spi_frame_count_++;
             spi_last_frame_ = rawVal;
             if (rawVal >> 15) {
@@ -768,7 +751,7 @@ void Encoder::abs_spi_cb(bool success) {
     // (a corrupted frame). Dropped samples count as missed reads in update(), whose spi_error_rate
     // filter raises ERROR_ABS_SPI_COM_FAIL if they persist; after 3 in a row the new value is
     // accepted, so a real step (e.g. at startup) can't lock the reading out.
-    if (config_.abs_spi_max_jump != 0 && abs_spi_have_last_ && abs_spi_good_frames_ >= 16) {
+    if (config_.abs_spi_max_jump != 0 && abs_spi_good_frames_ >= 16) {
         int32_t cpr = config_.cpr;
         int32_t d = (int32_t)pos - pos_abs_raw_;
         if (d >= cpr / 2) d -= cpr;
@@ -780,7 +763,6 @@ void Encoder::abs_spi_cb(bool success) {
         }
     }
     abs_spi_jumps_in_row_ = 0;
-    abs_spi_have_last_ = true;
     if (abs_spi_good_frames_ < 0xFFFFFFFFu) abs_spi_good_frames_++;
     pos_abs_raw_ = pos;
 

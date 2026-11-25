@@ -205,9 +205,9 @@ def main():
         b = base.get(k)
         flag = ""
         if b is not None and k in CHECKS and isinstance(val, (int, float)):
-            sign, rel, floor = CHECKS[k]
+            sign, rel_tol, floor = CHECKS[k]
             worse = (val - b) * sign
-            if worse > max(rel * abs(b), floor):
+            if worse > max(rel_tol * abs(b), floor):
                 flag = "  <-- WORSE"
                 problems.append(f"{k}: {val} vs baseline {b}")
         ch = f"{(val - b) / abs(b) * 100:+7.0f}%" if b not in (None, 0) else ""

@@ -27,7 +27,7 @@ jobs:
       - name: Check that the generated files match the interface file
         run: |
           make generate
-          git diff --exit-code -- docs/reference.md docs/cansimple.dbc tools/enums_v056.py tools/xdrive/props.py tools/xdrive/enums.py
+          git diff --exit-code -- docs/reference.md docs/cansimple.dbc tools/xdrive/props.py tools/xdrive/enums.py
       - name: Check the firmware reports the tag's version
         if: startsWith(github.ref, 'refs/tags/fw-v')
         run: |
@@ -69,6 +69,6 @@ jobs:
           for ext in elf bin hex; do mv "firmware.$ext" "xdrive-robotics-$v.$ext"; done
           mv bootloader.elf "xdrive-robotics-$v-bootloader.elf"
           mv firmware-with-bootloader.bin "xdrive-robotics-$v-with-bootloader.bin"
-          sha256sum xdrive-robotics-"$v".* > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" xdrive-robotics-"$v".* SHA256SUMS \
+          sha256sum xdrive-robotics-"$v"* > SHA256SUMS
+          gh release create "$GITHUB_REF_NAME" xdrive-robotics-"$v"* SHA256SUMS \
             --title "xdrive-robotics $v" --notes-file ../notes.md

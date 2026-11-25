@@ -2,7 +2,7 @@
 
 ## Reading errors
 
-`python tools/dump_board.py` prints every error on the board, decoded, along with the full config. Errors live in RAM: they clear on `odrv0.clear_errors()` (CAN: Clear Errors, 0x018) or a power cycle. Every error bit is described in the [property reference](reference.md#enums-and-error-bits), under `Error` (the board), `Axis.Error`, `Motor.Error`, `Encoder.Error` and `Controller.Error`.
+`python tools/dump_board.py` prints every error on the board, decoded, along with the full config. Errors live in RAM: they clear on `clear_errors()` (CAN: Clear Errors, 0x018) or a power cycle. Every error bit is described in the [property reference](reference.md#enums-and-error-bits), under `Error` (the board), `Axis.Error`, `Motor.Error`, `Encoder.Error` and `Controller.Error`.
 
 `python tools/idle.py` puts the axis in IDLE (no torque) and prints the errors.
 
@@ -21,9 +21,15 @@
 ## Connection
 
 - **No board on USB:** the MCU runs off the DC bus, so the board appears on USB only while the supply is on.
-- **Is it running this firmware?** Releases report version 1.0.0 or later (`odrv0.fw_version_major`, `fw_version_minor`, `fw_version_revision`); Makerbase's firmware reports 0.0.0. `odrv0.axis1` doesn't exist on this firmware.
+- **Is it running this firmware?** Releases report version 1.0.0 or later (`fw_version_major`, `fw_version_minor`, `fw_version_revision`; `python tools/dump_board.py` prints them); Makerbase's firmware reports 0.0.0. The tools in this repository can't talk to Makerbase's firmware.
 - **Unresponsive or crashed firmware:** hold S2 while pressing S1 (reset) to start the STM32's built-in bootloader, then flash with `usb_flash.py`, which picks up a board already in the bootloader. Over SWD, `swd_flash.py` can reach a crashed build when NRST is wired (J2 pin 5). The whole-flash backups in `backups/` restore any earlier state: `usb_flash.py --bin backups/<dir>/flash.bin --write`.
 - **USB drops under load:** route the USB cable away from the motor and supply cables, and see [ground loops](safety-and-regen.md#ground-loops).
+- **Nothing on CAN:** check `can.config.protocol` = 1 (a config carried over from Makerbase's firmware has 0, which silences the bus), the bit rate and node ID, the terminators (about 60 Ω between CAN_H and CAN_L with the power off), and the adapter's ground ([CAN](can.md#wiring)).
+
+## Saving
+
+- **A save that didn't stick:** `save_configuration()` reboots the board even when the flash store fails, and the board comes back on the config saved before. `config_save_failed` reads true after such a reboot; `set_config.py --save` and the library's `Board.save()` report it. On one board, every save during one power-on failed this way, and the same power-on's `enter_dfu_mode()` left the board off USB; after a power cycle both worked again. The cause is unknown: power-cycle the board and save again.
+- **A save that is refused:** the board refuses to save while the motor is armed. Put the axis in IDLE first (`python tools/idle.py`).
 
 ## Symptoms without an error
 

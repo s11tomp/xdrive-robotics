@@ -23,7 +23,7 @@ Output: `logs/<stamp>_<serial>_capture_<label>.csv`, with time in seconds from t
 
 ## From Python
 
-The same file is a library: `capture(dev, fields, decimation=1, trigger=None, post=None)` configures, waits and reads, returning the time axis, a NumPy array per property and the settings; `setup()` and `read()` split it, so a script can start a capture, run a move, and read afterwards. `regen_test.py` records its stops this way.
+The same file is a library: `capture(board, fields, decimation=1, trigger=None, post=None, timeout=10.0)` configures, waits and reads, returning the time axis, a NumPy array per property and the settings; `setup()` and `read()` split it, so a script can start a capture, run a move, and read afterwards. `regen_test.py` records its stops this way.
 
 ## The firmware interface
 
@@ -34,4 +34,4 @@ The same file is a library: `capture(dev, fields, decimation=1, trigger=None, po
 3. `start()`. `state` goes `ARMED`, then `TRIGGERED` (recording the post-trigger samples), then `DONE`. `trigger()` triggers by hand in any mode.
 4. Read the buffer from `readout_endpoint` in one transfer: `n_samples` frames of 4 bytes per channel, in channel order, with the trigger sample at `trigger_index`. Over CAN, read it 4 bytes at a time with [endpoint access](can.md#endpoint-access-0x1f).
 
-`capacity` = 8192 / channels frames. Recording costs about 10 µs of the 125 µs control period with 8 channels.
+`capacity` = 8192 / channels frames. Recording costs about 10 µs of the 125 µs control period with 8 channels. The capture replaces ODrive v0.5.6's `oscilloscope` object, a fixed buffer with a hard-wired signal and trigger, which this firmware doesn't have.

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 420" font-family="sans-serif" font-size="13" fill="#1f2937">
+  <title>One 125 µs control period: TIM1 PWM count and update events, ADC samples, the control loop's busy time, and the brake timer TIM2</title>
+  <rect width="900" height="420" fill="#ffffff"/>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1f2937"/>
+    </marker>
+    <pattern id="h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#2563eb" stroke-width="1.5"/>
+    </pattern>
+  </defs>
+  <!-- time scale: x = 90 + 6 px per µs; t = 0 is a bottom update event -->
+
+  <!-- control period -->
+  <path d="M90,30 V22 H840 V30" stroke="#1f2937" stroke-width="1.5" fill="none"/>
+  <rect x="345" y="13" width="240" height="18" fill="#ffffff"/>
+  <text x="465" y="26" text-anchor="middle">control period: 125 µs (8 kHz)</text>
+
+  <!-- update events -->
+  <g stroke="#2563eb" stroke-width="1" stroke-dasharray="4 3">
+    <line x1="90" y1="40" x2="90" y2="372"/>
+    <line x1="465" y1="40" x2="465" y2="372"/>
+    <line x1="840" y1="40" x2="840" y2="372"/>
+  </g>
+
+  <!-- TIM1 -->
+  <text x="80" y="82" text-anchor="end" font-size="12">TIM1 count</text>
+  <text x="80" y="97" text-anchor="end" font-size="11" fill="#4b5563">0 to 3500</text>
+  <polyline points="90,120 215,60 340,120 465,60 590,120 715,60 840,120" fill="none" stroke="#1f2937" stroke-width="1.5"/>
+  <g fill="#2563eb">
+    <circle cx="90" cy="120" r="5"/>
+    <circle cx="465" cy="60" r="5"/>
+    <circle cx="840" cy="120" r="5"/>
+  </g>
+  <path d="M90,128 V134 H340 V128" stroke="#4b5563" stroke-width="1" fill="none"/>
+  <text x="215" y="148" text-anchor="middle" font-size="11" fill="#4b5563">PWM period 41.7 µs (24 kHz)</text>
+  <text x="590" y="148" text-anchor="middle" font-size="11" fill="#2563eb">• update event: every 1.5 PWM periods, 62.5 µs apart (16 kHz)</text>
+
+  <!-- samples -->
+  <text x="80" y="180" text-anchor="end" font-size="12">ADC samples</text>
+  <g fill="#2563eb">
+    <path d="M90,168 l6,8 l-6,8 l-6,-8 z"/>
+    <path d="M465,168 l6,8 l-6,8 l-6,-8 z"/>
+    <path d="M840,168 l6,8 l-6,8 l-6,-8 z"/>
+  </g>
+  <text x="102" y="174" font-size="12">bottom: phase currents B, C and bus voltage</text>
+  <text x="102" y="189" font-size="11" fill="#4b5563">low-side FETs on, shunts carry the current</text>
+  <text x="477" y="174" font-size="12">top: current amplifier offsets</text>
+  <text x="477" y="189" font-size="11" fill="#4b5563">high-side FETs on, no shunt current</text>
+
+  <!-- CPU -->
+  <text x="80" y="232" text-anchor="end" font-size="12">Control loop</text>
+  <rect x="93" y="214" width="290" height="28" fill="#2563eb"/>
+  <text x="238" y="233" text-anchor="middle" fill="#ffffff" font-size="12">currents, encoder, controller, FOC</text>
+  <rect x="383" y="214" width="82" height="28" fill="url(#h)" stroke="#2563eb" stroke-width="1"/>
+  <rect x="465" y="214" width="63" height="28" fill="#2563eb"/>
+  <text x="102" y="276" font-size="11" fill="#4b5563">the bottom sample's interrupt starts the encoder's SPI read and the loop</text>
+  <text x="424" y="258" text-anchor="middle" font-size="11" fill="#4b5563">waits for the top sample</text>
+  <text x="535" y="226" font-size="11" fill="#4b5563">offsets, new duty cycles:</text>
+  <text x="535" y="240" font-size="11" fill="#4b5563">busy about 73 µs in all</text>
+  <line x1="528" y1="292" x2="836" y2="292" stroke="#1f2937" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="682" y="286" text-anchor="middle" font-size="11" fill="#4b5563">the duty cycles take effect at the next bottom event</text>
+
+  <!-- TIM2 -->
+  <text x="80" y="330" text-anchor="end" font-size="12">TIM2 count</text>
+  <text x="80" y="345" text-anchor="end" font-size="11" fill="#4b5563">brake PWM</text>
+  <g fill="#9ca3af" opacity="0.45">
+    <rect x="90" y="306" width="7" height="50"/>
+    <rect x="458" y="306" width="14" height="50"/>
+    <rect x="833" y="306" width="7" height="50"/>
+  </g>
+  <polyline points="90,356 277.5,310 465,356 652.5,310 840,356" fill="none" stroke="#b91c1c" stroke-width="1.5"/>
+  <rect x="98" y="363" width="640" height="15" fill="#ffffff"/>
+  <text x="102" y="374" font-size="11" fill="#4b5563">restarted by every TIM1 update event (16 kHz); its switching edges stay at least 1.1 µs (gray) from each sample</text>
+
+  <!-- time axis -->
+  <g font-size="11" fill="#4b5563" text-anchor="middle">
+    <text x="90" y="400">0</text>
+    <text x="465" y="400">62.5 µs</text>
+    <text x="840" y="400">125 µs</text>
+  </g>
+</svg>

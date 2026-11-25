@@ -2,7 +2,7 @@
 
 Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus two messages of this firmware's: the impedance command (0x1E), which sends a full setpoint and gets the joint's state back in one frame pair, and endpoint access (0x1F), which reads and writes any setting and calls any function, so a board can be configured, tuned and saved without USB.
 
-> **Status:** both frames are tested on the host against the firmware's headers (`make test`) and on a real bus with one board: `tools/can_test.py` ([Testing](testing.md)) passes on a 10018 bench stand at 1 Mbit/s through a CANable 2.0 Pro on slcan firmware, using the host library's CAN part. A bus with two or more boards is untested.
+> **Tested:** one board on a 1 Mbit/s bus, through a CANable 2.0 Pro adapter on slcan firmware, with the adapter's ground on the supply negative and the board on USB at the same time. `tools/can_test.py` ([Testing](testing.md#bench-tests)) covers heartbeats, endpoint access, a save-and-reboot round trip and impedance control; impedance cycles at 250 Hz take 0.97 ms from command to reply (median), none missed. A bus with two or more boards is untested.
 
 ## Wiring
 
@@ -17,15 +17,20 @@ Each Mini is one node on a CAN bus, speaking ODrive's CANSimple protocol plus tw
 
 ## Configure
 
-1. `odrv0.can.config.baud_rate = 1000000` (default 250000).
-2. `odrv0.axis0.config.can.node_id = <n>`: 0 to 63 with standard IDs, different on every board.
-3. `odrv0.save_configuration()` (the board reboots).
+Over USB, before a board joins the bus (Motor moves: the save reboots the board):
 
-CAN is on by default (`config.enable_can_a`, GPIO15 and GPIO16 in `GPIO_MODE_CAN_A`, and `can.config.protocol` = 1, CANSimple). With `can.config.protocol` = 0 the board neither sends nor answers anything on the bus, though its CAN controller runs. A config carried over from stock v0.5.1 has that 0: see [Migrating from stock](migrating-from-stock.md#carrying-settings-over). The [property reference](reference.md#odrv0axis0configcan) lists the cyclic message rates and the impedance ranges under `axis0.config.can`.
+```sh
+python tools/set_config.py --save can.config.baud_rate=1000000 axis0.config.can.node_id=1
+```
+
+- `can.config.baud_rate`: a rate that divides 2 MHz evenly, such as 1000000, 500000 or 250000 (the default); the same on every node. The board ignores any other value.
+- `axis0.config.can.node_id`: 0 to 63 with standard IDs, different on every board. Every board starts at 0, so give each its own ID before connecting a second one.
+
+CAN is on by default (`config.enable_can_a`, GPIO15 and GPIO16 in `GPIO_MODE_CAN_A`, and `can.config.protocol` = 1, CANSimple). With `can.config.protocol` = 0 the board neither sends nor answers anything on the bus, though its CAN controller runs. A config carried over from stock v0.5.1 has that 0: see [Migrating from Makerbase's firmware](migrating-from-stock.md#carrying-settings-over). The [property reference](reference.md#odrv0axis0configcan) lists the cyclic message rates and the impedance ranges under `axis0.config.can`.
 
 ## Frames
 
-A frame's 11-bit ID is `node_id << 5 | cmd`: node 1's Set Input Pos (0x0C) is `0x01 << 5 | 0x0C = 0x2C`. Lower IDs win arbitration, so a lower node ID and command number get the bus first. Payloads are little-endian, except the impedance frame's bit fields.
+A frame's 11-bit ID is `node_id << 5 | cmd`: node 1's Set Input Pos (0x0C) is `0x01 << 5 | 0x0C = 0x2C`. Lower IDs win arbitration, so a lower node ID and command number get the bus first. Payloads are little-endian, except the impedance frame's bit fields. The [CAN bootloader](bootloader.md#protocol) uses 29-bit IDs, which never collide with these.
 
 Every frame addressed to a board feeds its watchdog.
 
@@ -95,15 +100,9 @@ torque = kp × (position setpoint − position) + kd × (velocity setpoint − v
 
 The command only sets the inputs; it doesn't change the mode or state.
 
-**Layout.** Both frames are big-endian bit fields, the layout of the MIT Cheetah actuators (source: `src/communication/can/impedance_frame.hpp`):
+**Layout.** Both frames are big-endian bit fields, the layout of the MIT Cheetah actuators (source: `src/communication/can/impedance_frame.hpp`). The 12-bit fields split bytes at the nibble: byte 3 in both frames, and byte 6 in the command:
 
-| Frame | Bits 63–48 | 47–36 | 35–24 | 23–12 | 11–0 |
-|---|---|---|---|---|---|
-| Command | position, 16 | velocity, 12 | kp, 12 | kd, 12 | torque, 12 |
-
-| Frame | Bits 63–48 | 47–36 | 35–24 | 23–16 | 15–8 | 7–0 |
-|---|---|---|---|---|---|---|
-| Reply | position, 16 | velocity, 12 | torque, 12 | flags, 8 | FET temperature [°C], 8 | bus voltage [0.25 V], 8 |
+![Impedance frame layout. Command: position bits 63-48, velocity 47-36, kp 35-24, kd 23-12, torque 11-0. Reply: position 63-48, velocity 47-36, torque 35-24, flags 23-16, FET temperature 15-8 in 1 °C, bus voltage 7-0 in 0.25 V. Flag bit 0 armed, bit 1 error, bit 2 watchdog hold](figures/impedance-frame.svg)
 
 Signed fields map [−range, +range] to two's complement, with +range at 2^(bits−1) − 1; kp and kd map [0, max] to [0, 2^bits − 1]. Values beyond the range saturate. The ranges are settings on the board (`axis0.config.can.impedance_*`) and must match on the host:
 
@@ -115,7 +114,7 @@ Signed fields map [−range, +range] to two's complement, with +range at 2^(bits
 | kd | `impedance_kd_max` | 0 to 2 Nm/(turn/s) | 0.00049 Nm/(turn/s) |
 | Torque | `impedance_torque_range` | ±4 Nm | 0.0020 Nm |
 
-Reply flags: bit 0 armed (closed loop, motor armed), bit 1 any axis, motor, encoder or controller error, bit 2 watchdog hold active ([Safety and regen](safety-and-regen.md#watchdog-decelerate-and-hold)).
+The watchdog hold flag (reply bit 2) is described in [Safety and regen](safety-and-regen.md#watchdog-decelerate-and-hold).
 
 **From Python:** the [host library](python-library.md#can) does this for several joints per cycle (`bus.cycle()`). Without it, with [python-can](https://python-can.readthedocs.io) and the host codec `tools/xdrive/impedance_frame.py` (no I/O of its own):
 
@@ -190,8 +189,8 @@ An 8-byte frame takes about 0.13 ms at 1 Mbit/s, including bit stuffing. For six
 
 | Cycle rate | Frames per second | Bus load |
 |---|---|---|
-| 250 Hz | 3,000 | about 33 % |
-| 500 Hz | 6,000 | about 67 % (too close to full) |
+| 250 Hz | 3,000 | about 39 % |
+| 500 Hz | 6,000 | about 78 % (too close to full) |
 
 The default cyclic messages add 660 frames per second for six boards (heartbeat every 100 ms, encoder estimates every 10 ms), about 9 %. The impedance reply already carries position and velocity, so set `encoder_rate_ms = 0` when commanding with it.
 
@@ -206,4 +205,6 @@ The default cyclic messages add 660 frames per second for six boards (heartbeat 
 
 ## Other hosts
 
-The ODriveArduino library's `ODriveCAN` speaks ODrive's v0.6 protocol. Against this firmware, which is based on v0.5.6, its heartbeat decoding and some commands differ; check each message against the table above.
+The ODriveArduino library's `ODriveCAN` speaks ODrive's v0.6 protocol. Against this firmware, which is based on v0.5.6, its heartbeat decoding and some commands differ; check each message against the table above. (Against Makerbase's v0.5.1 firmware it is worse: `setPosGain()` and `setVelGains()` are silently ignored, `setLimits()` applies only the velocity limit, and the bus voltage message carries no current.)
+
+Any host with python-can can use the [host library](python-library.md#can), which implements both added messages and the reconnect after a reboot.

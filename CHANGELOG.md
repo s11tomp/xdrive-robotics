@@ -1,53 +1,49 @@
 # Changelog
 
-This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions it builds on. Each release's section (`## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`) becomes the notes of its GitHub release; changes not yet released collect under the next version, dated `Unreleased`.
+This file lists xdrive-robotics releases first, then upstream ODrive's own changelog for the versions this firmware builds on. Each release's section (`## xdrive-robotics [X.Y.Z] - YYYY-MM-DD`) becomes the notes of its GitHub release; changes not yet released collect under the next version, dated `Unreleased`.
 
 ## xdrive-robotics [1.0.0] - Unreleased
 
-Based on ODrive v0.5.6, for the MKS XDRIVE Mini. Flashing it over Makerbase's v0.5.1 firmware resets the board's config.
+The first release: ODrive v0.5.6 for the MKS XDRIVE Mini, with the host tools that flash, configure and test it. This section lists the differences from ODrive v0.5.6. A board's first flash is `xdrive-robotics-1.0.0-with-bootloader.bin` (the CAN bootloader and the firmware); flashing it over Makerbase's v0.5.1 firmware resets the board's config (`docs/migrating-from-stock.md`).
 
 ### Added
 - MKS XDRIVE Mini support: one axis (`axis0`), matching the Mini's single motor channel.
-- AS5047 frame checks with counters (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`; `encoder.spi_*_count`) and rejection of impossible jumps (`abs_spi_max_jump`).
-- Encoder correction table: `AXIS_STATE_ENCODER_CORRECTION_CALIBRATION` (14), 256 bins, harmonics 1 to 12 (`encoder.config.correction_enabled`, `correction_max_harmonic`).
+- AS5047 frame checks with counters (`encoder.config.abs_spi_check_parity`, `abs_spi_reject_error_flag`; `encoder.spi_*_count`) and rejection of impossible jumps (`abs_spi_max_jump`, on by default at 1024 counts).
+- Encoder correction table: `AXIS_STATE_ENCODER_CORRECTION_CALIBRATION` (14), 256 bins, harmonics 1 to 12 (`encoder.config.correction_enabled`, `correction_max_harmonic`, `get_correction()`, `set_correction()`).
 - Watchdog decelerate-and-hold (`axis.config.watchdog_action`, `watchdog_decel`, `watchdog_torque_lim`; `controller.timeout_active`).
 - Soft position limits (`controller.config.pos_min`, `pos_max`, `pos_limit_margin`) and following-error faults (`max_pos_error`, `max_vel_error`). Safety faults zero the torque.
 - Impedance control (`CONTROL_MODE_IMPEDANCE_CONTROL`, 4; `controller.input_kp`, `input_kd`).
 - CAN impedance command and reply (CANSimple ID 0x1E; full scales in `axis.config.can.impedance_*`).
-- CAN endpoint access (CANSimple ID 0x1F): read or write any property up to 4 bytes wide, call any function, and read the interface JSON and the capture buffer, by endpoint ID (host codec `tools/xdrive/endpoint_frame.py`).
+- CAN endpoint access (CANSimple ID 0x1F): read or write any property up to 4 bytes wide, call any function, and read the interface JSON and the capture buffer, by endpoint ID.
+- CAN bootloader in flash sectors 0-1, and firmware updates over CAN (`tools/can_flash.py`). The firmware starts only when its sealed image header (length, CRC-32, version) checks out; an interrupted update leaves the board waiting in the bootloader. `enter_can_bootloader()` resets into it at the board's node ID and bit rate; after a power-up the bootloader listens 100 ms for a DISCOVER.
 - Flux braking (`motor.config.flux_brake_start_voltage`, `flux_brake_gain`) and bus current soft limits (`motor.config.I_bus_soft_min`, `I_bus_soft_max`).
-- High-rate capture (`odrv.capture`), replacing the hard-wired oscilloscope buffer.
-- Build with plain make (`make`), and host tools for flashing over USB DFU or SWD, configuration and bench tests (`tools/`).
-- Bench tools for a load on the rotor, such as a gearbox: `hold_sweep.py` (holding current and position error over a span of angles, approached from both sides, separating position-dependent torque from static friction) and `runin.py` (timed constant-speed run-in, reversing at an interval, with stall, drag and temperature stops).
-- Host library `xdrive` (`tools/xdrive/`): typed reads, writes and function calls on a board over USB, with every property and function named in the generated `xdrive.props` (`board.get(odrv.axis0.encoder.pos_estimate)`), checked by mypy. It speaks the firmware's USB protocol itself, without the `odrive` Python package. Over CAN (`xdrive.can`, with python-can), the same board API runs through endpoint access, and a `Bus` lists nodes by heartbeat and sends one impedance command per joint per control cycle.
-- `can_test.py`: bench test of one board over a USB-CAN adapter (heartbeats, endpoint access, a save-and-reboot round trip, impedance control through the 0x1E frame, command-to-reply latency, command to current, six joints' bus traffic), and the `gs_usb` and `pyserial` packages in `requirements.txt` for candleLight and slcan adapters.
-- `config_save_failed`: true after a `save_configuration()` whose flash store failed. The board reboots after every save, so a failed one otherwise looks like a successful one that came back with the old config. The host library's `Board.save()` raises `Refused` when it is set, and `set_config.py --save` reports it.
-- A CAN database for this firmware's CANSimple messages, the impedance command included (`docs/cansimple.dbc`), and `make test`, which runs ODrive's unit tests and the host tools' tests without a board.
-- CAN bootloader (`docs/bootloader.md`): firmware updates over CAN (`can_flash.py`), from flash sectors 0-1. The firmware starts only when its sealed image header (length, CRC-32, version) checks out; an interrupted update leaves the board waiting in the bootloader. `enter_can_bootloader()` resets into it at the board's node ID and bit rate; after a power-up the bootloader listens 100 ms for a DISCOVER. `usb_flash.py` and `swd_flash.py` refuse firmware linked behind the bootloader on a board without it.
+- High-rate capture (`odrv.capture`): up to 8 properties at 8 kHz into a 32 KiB RAM buffer.
+- `config_save_failed`: true after a `save_configuration()` whose flash store failed. The board reboots after every save, so a failed one otherwise looks like a successful one that came back with the old config.
+- Diagnostics: `motor.spike_count` with its event log (`get_spike_n()`, `get_spike_db()`, `get_spike_dc()`), and `set_adc1_scan()`.
+- A build with plain make (`make`), host unit tests that need no board (`make test`), and a CAN database for this firmware's messages (`docs/cansimple.dbc`).
+- Host library `xdrive` (`tools/xdrive/`): typed reads, writes and function calls on a board over USB, without the `odrive` Python package, with every property and function named in the generated `xdrive.props` and checked by mypy. Over CAN (`xdrive.can`, with python-can), the same board API runs through endpoint access, and a `Bus` lists nodes by heartbeat and sends one impedance command per joint per control cycle.
+- Host tools (`tools/`, `docs/tools.md`): flashing over USB DFU, SWD and CAN with a whole-flash backup and read-back checks; configuration, calibration and correction-table tools; capture; and bench tests of every added feature with PASS/FAIL checks.
+- Documentation (`docs/`), including a property reference generated from the interface file.
 
 ### Changed
-- The firmware is linked at 0x08008000, behind the CAN bootloader, and sealed by the build (`tools/seal_image.py`), which also writes the `.bin` and `.hex`. A board's first flash is `firmware-with-bootloader.bin` (both, from 0x08000000).
+- The firmware is linked at 0x08008000, behind the CAN bootloader, and sealed by the build (`tools/seal_image.py`).
 - Entering closed loop starts from rest: zero velocity and torque setpoints, no running trajectory.
+- `input_torque` is torque feed-forward in the velocity ramp, position filter and trapezoidal trajectory input modes too, added to their `inertia` term (ODrive v0.5.6 replaces it with that term), and the trajectory applies it after a move as well. The torque fields of CAN Set Input Pos (0x00C) and Set Input Vel (0x00D) therefore act in those modes.
 - The CAN thread's stack is 4 KB, the USB thread's size (ODrive: 1 KB): endpoint access runs the same handlers as USB.
-- The brake resistor's PWM (TIM2) runs at 16 kHz, restarted by every TIM1 update event, so its edges stay at least 1.1 us from each current sample. Running free at 10.25 kHz, its edges crossed the samples several times a second and corrupted those readings by up to 2.2 A for one control period.
-- `input_torque` is torque feed-forward in the velocity ramp, position filter and trapezoidal trajectory input modes too, added to their `inertia` term (ODrive v0.5.6 replaced it with that term), and the trajectory applies it after a move as well (`feedforward_test.py` checks it on the bench). The torque fields of CAN Set Input Pos (0x00C) and Set Input Vel (0x00D) therefore act in those modes.
-- `watchdog_action` defaults to `DECEL_HOLD`; every other added safety and regen feature is off by default.
-- The host tools use the `xdrive` library; `requirements.txt` no longer holds the `odrive` package or its `ipython` pin. Error flags print at full width, motor error bits 32-35 included.
-- `sample.py` reads about 340 samples per second (150 before), `move_test.py` about 275 (200), and the capture readout takes 0.13 s (0.23). Two CSV columns take their v0.5.6 names: `axis0.motor.fet_thermistor.temperature` and `axis0.motor.I_bus`.
-- The tools talk only to this firmware: a board on Makerbase's v0.5.1 firmware is flashed by putting it in DFU mode first, or with `swd_flash.py --no-usb`.
-- Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt at each TIM1 update event. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 started).
+- The brake resistor's PWM (TIM2) runs at 16 kHz, restarted by every TIM1 update event, so its edges stay at least 1.1 us from each current sample. ODrive's free-running 10.25 kHz PWM crosses the samples several times a second and corrupts those readings by up to 2.2 A for one control period.
+- Motor 0's current sample starts the control loop: ADC1's injected end-of-conversion interrupt runs at every TIM1 update event and starts the loop after the bottom one, at 8 kHz. The encoder is sampled about 1 us after the phase currents (9.7 us on ODrive v3.6, whose loop TIM8 starts).
 - The second motor's gate drive and gate driver chip select pins are in analog mode; the Mini leaves them unconnected.
 
 ### Removed
 - The second axis (`axis1`) and everything that served it: the second motor's gate driver, PWM timer (TIM8), encoder timer (TIM4), current sampling, FET thermistor and thread. Dual-motor boards are not supported.
 - `INPUT_MODE_MIRROR` (7) with `controller.config.axis_to_mirror`, `mirror_ratio` and `torque_mirror_ratio`, and `controller.config.load_encoder_axis`: both took values from the other axis. The controller always uses its own axis's encoder (or the sensorless estimator).
 - `CONTROLLER_ERROR_INVALID_MIRROR_AXIS` (0x8), `CONTROLLER_ERROR_INVALID_LOAD_ENCODER` (0x10) and `GPIO_MODE_ENC1` (12). Every other error bit, input mode and GPIO mode keeps its ODrive v0.5.6 number.
+- The `oscilloscope` object; `odrv.capture` replaces it.
 - `get_drv_fault()` returns the one gate driver's fault word (uint32).
 - ODrive's GUI, Arduino library, in-tree Python package (`odrivetool`), Docker and tup builds.
 
 ### Fixed
 - The SPI arbiter unlinks a finished or failed task before its callback, which could otherwise freeze the board.
-- `xdrive.paths.get` returns an enum value that this build lacks as its number, so `set_config.py` can replace a setting saved by another build (for example a GPIO mode whose number this firmware no longer defines).
 
 
 ## [0.5.6] - Unreleased

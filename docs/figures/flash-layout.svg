@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 350" font-family="sans-serif" font-size="13" fill="#1f2937">
+  <title>STM32F405 flash: CAN bootloader in sectors 0-1, firmware in sectors 2-9, config in sectors 10-11, and what writes each</title>
+  <rect width="900" height="350" fill="#ffffff"/>
+
+  <!-- region guides -->
+  <g stroke="#9ca3af" stroke-width="1" stroke-dasharray="4 3">
+    <line x1="132" y1="40" x2="132" y2="330"/>
+    <line x1="708" y1="40" x2="708" y2="330"/>
+  </g>
+
+  <!-- addresses -->
+  <g font-family="monospace" font-size="12" fill="#4b5563">
+    <text x="28" y="32">0x08000000</text>
+    <text x="136" y="32">0x08008000</text>
+    <text x="708" y="32" text-anchor="middle">0x080C0000</text>
+    <text x="868" y="32" text-anchor="end">0x08100000</text>
+  </g>
+
+  <!-- sectors: widths not to scale (16 KB, 64 KB and 128 KB sectors) -->
+  <g stroke-width="1.5">
+    <g fill="#ffffff" stroke="#2563eb">
+      <rect x="28" y="44" width="52" height="50"/>
+      <rect x="80" y="44" width="52" height="50"/>
+    </g>
+    <g fill="#eef2f7" stroke="#1f2937">
+      <rect x="132" y="44" width="52" height="50"/>
+      <rect x="184" y="44" width="52" height="50"/>
+      <rect x="236" y="44" width="72" height="50"/>
+      <rect x="308" y="44" width="80" height="50"/>
+      <rect x="388" y="44" width="80" height="50"/>
+      <rect x="468" y="44" width="80" height="50"/>
+      <rect x="548" y="44" width="80" height="50"/>
+      <rect x="628" y="44" width="80" height="50"/>
+    </g>
+    <g fill="#ffffff" stroke="#b91c1c">
+      <rect x="708" y="44" width="80" height="50"/>
+      <rect x="788" y="44" width="80" height="50"/>
+    </g>
+  </g>
+  <g text-anchor="middle">
+    <text x="54" y="66">0</text><text x="106" y="66">1</text><text x="158" y="66">2</text><text x="210" y="66">3</text>
+    <text x="272" y="66">4</text><text x="348" y="66">5</text><text x="428" y="66">6</text><text x="508" y="66">7</text>
+    <text x="588" y="66">8</text><text x="668" y="66">9</text><text x="748" y="66">10</text><text x="828" y="66">11</text>
+  </g>
+  <g text-anchor="middle" font-size="11" fill="#4b5563">
+    <text x="54" y="84">16 KB</text><text x="106" y="84">16 KB</text><text x="158" y="84">16 KB</text><text x="210" y="84">16 KB</text>
+    <text x="272" y="84">64 KB</text><text x="348" y="84">128 KB</text><text x="428" y="84">128 KB</text><text x="508" y="84">128 KB</text>
+    <text x="588" y="84">128 KB</text><text x="668" y="84">128 KB</text><text x="748" y="84">128 KB</text><text x="828" y="84">128 KB</text>
+  </g>
+
+  <!-- region brackets and labels -->
+  <g stroke-width="1.5" fill="none">
+    <path d="M30,102 V108 H130 V102" stroke="#2563eb"/>
+    <path d="M134,102 V108 H706 V102" stroke="#1f2937"/>
+    <path d="M710,102 V108 H866 V102" stroke="#b91c1c"/>
+  </g>
+  <text x="80" y="126" text-anchor="middle" fill="#2563eb">CAN bootloader</text>
+  <text x="80" y="142" text-anchor="middle" font-size="11" fill="#4b5563">about 4 KB used</text>
+  <text x="420" y="126" text-anchor="middle">firmware: vector table, image header, code</text>
+  <text x="420" y="142" text-anchor="middle" font-size="11" fill="#4b5563">header at 0x08008200: length, CRC-32, hardware and firmware version</text>
+  <text x="788" y="126" text-anchor="middle" fill="#b91c1c">config</text>
+  <text x="788" y="142" text-anchor="middle" font-size="11" fill="#4b5563">two sectors, written in turn</text>
+
+  <!-- writers -->
+  <text x="28" y="180" font-size="12" fill="#4b5563">What writes each region (every flash tool erases only the sectors its image reaches):</text>
+
+  <text x="28" y="208"><tspan font-family="monospace" font-size="12">firmware-with-bootloader.bin</tspan> through <tspan font-family="monospace" font-size="12">usb_flash.py --bin</tspan> or <tspan font-family="monospace" font-size="12">swd_flash.py --bin</tspan>: the first flash</text>
+  <rect x="28" y="216" width="417" height="14" fill="#2563eb"/>
+  <rect x="445" y="216" width="263" height="14" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="576" y="227" text-anchor="middle" font-size="11" fill="#4b5563">to the end of the image</text>
+
+  <text x="132" y="258"><tspan font-family="monospace" font-size="12">firmware.elf</tspan> through <tspan font-family="monospace" font-size="12">usb_flash.py --elf</tspan>, <tspan font-family="monospace" font-size="12">swd_flash.py --elf</tspan> or <tspan font-family="monospace" font-size="12">can_flash.py</tspan>: updates</text>
+  <rect x="132" y="266" width="313" height="14" fill="#1f2937"/>
+  <rect x="445" y="266" width="263" height="14" fill="none" stroke="#1f2937" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="576" y="277" text-anchor="middle" font-size="11" fill="#4b5563">to the end of the image</text>
+
+  <text x="868" y="308" text-anchor="end"><tspan font-family="monospace" font-size="12">save_configuration()</tspan></text>
+  <rect x="708" y="316" width="160" height="14" fill="#b91c1c"/>
+</svg>

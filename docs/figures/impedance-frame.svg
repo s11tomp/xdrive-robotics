@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 330" font-family="sans-serif" font-size="13" fill="#1f2937">
+  <title>CAN impedance frame 0x1E: the command and reply bit fields across the eight data bytes</title>
+  <rect width="900" height="330" fill="#ffffff"/>
+
+  <!-- byte columns: 100 px per byte, 12.5 px per bit -->
+  <g font-size="11" fill="#4b5563" text-anchor="middle">
+    <text x="100" y="24">byte 0</text><text x="200" y="24">byte 1</text><text x="300" y="24">byte 2</text><text x="400" y="24">byte 3</text>
+    <text x="500" y="24">byte 4</text><text x="600" y="24">byte 5</text><text x="700" y="24">byte 6</text><text x="800" y="24">byte 7</text>
+  </g>
+  <g stroke="#9ca3af" stroke-width="1">
+    <line x1="50" y1="30" x2="50" y2="236"/><line x1="150" y1="30" x2="150" y2="236"/><line x1="250" y1="30" x2="250" y2="236"/>
+    <line x1="350" y1="30" x2="350" y2="236"/><line x1="450" y1="30" x2="450" y2="236"/><line x1="550" y1="30" x2="550" y2="236"/>
+    <line x1="650" y1="30" x2="650" y2="236"/><line x1="750" y1="30" x2="750" y2="236"/><line x1="850" y1="30" x2="850" y2="236"/>
+  </g>
+
+  <!-- command -->
+  <rect x="48" y="37" width="150" height="17" fill="#ffffff"/>
+  <text x="50" y="50" font-size="12" fill="#2563eb">Command (host to board)</text>
+  <g stroke="#2563eb" stroke-width="1.5" fill="#ffffff">
+    <rect x="50" y="58" width="200" height="50"/>
+    <rect x="250" y="58" width="150" height="50"/>
+    <rect x="400" y="58" width="150" height="50"/>
+    <rect x="550" y="58" width="150" height="50"/>
+    <rect x="700" y="58" width="150" height="50"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="150" y="80">position</text><text x="325" y="80">velocity</text><text x="475" y="80">kp</text>
+    <text x="625" y="80">kd</text><text x="775" y="80">torque</text>
+  </g>
+  <g text-anchor="middle" font-size="11" fill="#4b5563">
+    <text x="150" y="98">16 bits, ±pos_range</text><text x="325" y="98">12 bits, ±vel_range</text><text x="475" y="98">12 bits, 0 to kp_max</text>
+    <text x="625" y="98">12 bits, 0 to kd_max</text><text x="775" y="98">12 bits, ±torque_range</text>
+  </g>
+  <g font-family="monospace" font-size="11" fill="#4b5563">
+    <text x="53" y="122">63</text><text x="247" y="122" text-anchor="end">48</text>
+    <text x="253" y="122">47</text><text x="397" y="122" text-anchor="end">36</text>
+    <text x="403" y="122">35</text><text x="547" y="122" text-anchor="end">24</text>
+    <text x="553" y="122">23</text><text x="697" y="122" text-anchor="end">12</text>
+    <text x="703" y="122">11</text><text x="847" y="122" text-anchor="end">0</text>
+  </g>
+
+  <!-- reply -->
+  <rect x="48" y="147" width="178" height="17" fill="#ffffff"/>
+  <text x="50" y="160" font-size="12">Reply (board to host, same ID)</text>
+  <g stroke="#1f2937" stroke-width="1.5" fill="#eef2f7">
+    <rect x="50" y="168" width="200" height="50"/>
+    <rect x="250" y="168" width="150" height="50"/>
+    <rect x="400" y="168" width="150" height="50"/>
+    <rect x="550" y="168" width="100" height="50"/>
+    <rect x="650" y="168" width="100" height="50"/>
+    <rect x="750" y="168" width="100" height="50"/>
+  </g>
+  <g text-anchor="middle">
+    <text x="150" y="190">position</text><text x="325" y="190">velocity</text><text x="475" y="190">torque</text>
+    <text x="600" y="190">flags</text><text x="700" y="190">FET temp</text><text x="800" y="190">bus voltage</text>
+  </g>
+  <g text-anchor="middle" font-size="11" fill="#4b5563">
+    <text x="150" y="208">16 bits, ±pos_range</text><text x="325" y="208">12 bits, ±vel_range</text><text x="475" y="208">12 bits, ±torque_range</text>
+    <text x="600" y="208">8 bits</text><text x="700" y="208">8 bits, 1 °C</text><text x="800" y="208">8 bits, 0.25 V</text>
+  </g>
+  <g font-family="monospace" font-size="11" fill="#4b5563">
+    <text x="53" y="232">63</text><text x="247" y="232" text-anchor="end">48</text>
+    <text x="253" y="232">47</text><text x="397" y="232" text-anchor="end">36</text>
+    <text x="403" y="232">35</text><text x="547" y="232" text-anchor="end">24</text>
+    <text x="553" y="232">23</text><text x="647" y="232" text-anchor="end">16</text>
+    <text x="653" y="232">15</text><text x="747" y="232" text-anchor="end">8</text>
+    <text x="753" y="232">7</text><text x="847" y="232" text-anchor="end">0</text>
+  </g>
+
+  <!-- flags detail -->
+  <path d="M600,236 V256" stroke="#1f2937" stroke-width="1.5" fill="none"/>
+  <rect x="430" y="256" width="340" height="62" rx="6" fill="#ffffff" stroke="#1f2937" stroke-width="1.5"/>
+  <g font-size="12">
+    <text x="444" y="276">bit 0: armed (closed loop, motor armed)</text>
+    <text x="444" y="293">bit 1: an axis, motor, encoder or controller error</text>
+    <text x="444" y="310">bit 2: watchdog hold active</text>
+  </g>
+
+  <text x="50" y="276" font-size="11" fill="#4b5563">Fields are big-endian: bit 63 is the most</text>
+  <text x="50" y="292" font-size="11" fill="#4b5563">significant bit of byte 0. Ranges are the board's</text>
+  <text x="50" y="308" font-size="11" fill="#4b5563"><tspan font-family="monospace">axis0.config.can.impedance_*</tspan> settings.</text>
+</svg>

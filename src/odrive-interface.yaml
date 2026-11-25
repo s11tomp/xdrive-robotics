@@ -20,6 +20,7 @@ interfaces:
       toplevel interface.
     attributes:
       error:
+        doc: "Board-level errors (bits in `Error`). `clear_errors()` clears them."
         nullflag: NONE
         flags:
           CONTROL_ITERATION_MISSED:
@@ -32,51 +33,36 @@ interfaces:
           DC_BUS_UNDER_VOLTAGE:
             brief: The DC voltage fell below the limit configured in `config.dc_bus_undervoltage_trip_level`.
             doc: |
-              Confirm that your power leads are connected securely. For initial
-              testing a 12V PSU which can supply a couple of amps should be
-              sufficient while the use of low current ‘wall wart’ plug packs may
-              lead to inconsistent behaviour and is not recommended.
-
-              You can monitor your PSU voltage using liveplotter in odrivetool
-              by entering `start_liveplotter(lambda: [odrv0.vbus_voltage])`. If
-              you see your votlage drop below `config.dc_bus_undervoltage_trip_level`
-              (default: ~ 8V) then you will trip this error. Even a relatively
-              small motor can draw multiple kW momentary and so unless you have
-              a very large PSU or are running of a battery you may encounter
-              this error when executing high speed movements with a high current
-              limit. To limit your PSU power draw you can limit your motor
-              current and/or velocity limit `Axis:controller.config.vel_limit` and
-              `Axis:motor.config.current_lim`.
+              Check that the power leads are connected securely and that the supply
+              can deliver the motor's peak current: a supply that sags under load
+              trips this error during fast moves at a high current limit. The
+              default trip level is 8 V. `tools/sample.py` logs `vbus_voltage`, and
+              `tools/capture.py` records it at 8 kHz. Lowering
+              `axis0.motor.config.current_lim` or `axis0.controller.config.vel_limit`
+              lowers the peak draw.
           DC_BUS_OVER_VOLTAGE:
             brief: The DC voltage exceeded the limit configured in `config.dc_bus_overvoltage_trip_level`.
             doc: |
-              Confirm that you have a brake resistor of the correct value
-              connected securely and that `config.brake_resistance` is set to
-              the value of your brake resistor.
-
-              You can monitor your PSU voltage using liveplotter in odrivetool
-              by entering `start_liveplotter(lambda: [odrv0.vbus_voltage])`. If
-              during a move you see the voltage rise above your PSU’s nominal
-              set voltage then you have your brake resistance set too low. This
-              may happen if you are using long wires or small gauge wires to
-              connect your brake resistor to your odrive which will added extra
-              resistance. This extra resistance needs to be accounted for to
-              prevent this voltage spike. If you have checked all your
-              connections you can also try increasing your brake resistance by
-              ~ 0.01 ohm at a time to a maximum of 0.05 greater than your brake
-              resistor value.
+              Usually regen: a braking motor pushed current back into a supply that
+              can't sink it. Enable a brake resistor (`config.enable_brake_resistor`,
+              with `config.brake_resistance` set to its value, wiring included), or
+              set flux braking or the bus current soft limits
+              (`axis0.motor.config.flux_brake_start_voltage`, `I_bus_soft_min`).
+              Keep the trip level a few volts above the supply voltage.
           DC_BUS_OVER_REGEN_CURRENT:
             doc: |
               Current flowing back into the power supply exceeded `config.dc_max_negative_current`.
-              This can happen if your brake resistor is disabled or unable to handle the braking current.
-              
+              This happens when the brake resistor is disabled or can't absorb the braking current.
+
               Check that `config.enable_brake_resistor` is `True` and that
-              `(V_power_supply / Brake_resistance) > (total motor.config.current_lim + total motor.config.current_lim_margin)`.
+              supply voltage / `config.brake_resistance` exceeds `axis0.motor.config.current_lim` + `current_lim_margin`.
           DC_BUS_OVER_CURRENT:
             doc: |
               Too much current was pulled from the power supply. `ibus` exceeded `config.dc_max_positive_current`.
           BRAKE_DEADTIME_VIOLATION:
+            doc: The brake resistor's PWM timings left less than the required dead time between its two FETs. Every motor disarms.
           BRAKE_DUTY_CYCLE_NAN:
+            doc: The computed brake duty cycle was not a number (for example from an invalid `vbus_voltage`). Every motor and the brake resistor disarm.
           INVALID_BRAKE_RESISTANCE: {doc: '`config.brake_resistance` is non-positive or NaN. Make sure that `config.brake_resistance` is a positive number.'}
 #          BRAKE_RESISTOR_DISARMED:
 #            doc: The brake resistor was unexpectedly disarmed.
@@ -102,18 +88,18 @@ interfaces:
             Filter gain for the reported `ibus`. Set to a value below 1.0 to get a smoother
             line when plotting `ibus`. Set to 1.0 to disable. This filter is only applied to
             the reported value and not for internal calculations.
-      serial_number: readonly uint64
-      hw_version_major: readonly uint8
-      hw_version_minor: readonly uint8
-      hw_version_variant: readonly uint8
-      fw_version_major: readonly uint8
-      fw_version_minor: readonly uint8
-      fw_version_revision: readonly uint8
+      serial_number: {type: readonly uint64, doc: "The MCU's unique ID, folded to 48 bits. The USB serial number is this value in hex."}
+      hw_version_major: {type: readonly uint8, doc: "3 on the MKS XDRIVE Mini, which reports itself as an ODrive v3.6."}
+      hw_version_minor: {type: readonly uint8, doc: "6 on the MKS XDRIVE Mini."}
+      hw_version_variant: {type: readonly uint8, doc: "The board's voltage variant: 56 on the MKS XDRIVE Mini."}
+      fw_version_major: {type: readonly uint8, doc: "Firmware version, major part. Releases of this firmware start at 1.0.0; Makerbase's stock firmware reports 0.0.0."}
+      fw_version_minor: {type: readonly uint8, doc: Firmware version, minor part.}
+      fw_version_revision: {type: readonly uint8, doc: Firmware version, patch part.}
       fw_version_unreleased:
         type: readonly uint8
-        doc: 0 for official releases, 1 otherwise
-      brake_resistor_armed: readonly bool
-      brake_resistor_saturated: readonly bool
+        doc: 0 for a build of a release tag, 1 for any other commit or a modified tree (which reports the last release's version).
+      brake_resistor_armed: {type: readonly bool, doc: "True while the brake resistor's PWM runs. A system error disarms it; a reboot or `clear_errors()` re-arms it."}
+      brake_resistor_saturated: {type: readonly bool, doc: "Latched true once the brake duty cycle reached its 95 % limit: the resistor couldn't absorb all the regen current."}
       brake_resistor_current:
         type: readonly float32
         doc: Commanded brake resistor current
@@ -137,40 +123,40 @@ interfaces:
       system_stats:
         c_is_class: False
         attributes:
-          uptime: readonly uint32
-          min_heap_space: readonly uint32
-          max_stack_usage_axis: readonly uint32
-          max_stack_usage_usb: readonly uint32
-          max_stack_usage_uart: readonly uint32
-          max_stack_usage_can: readonly uint32
-          max_stack_usage_startup: readonly uint32
-          max_stack_usage_analog: readonly uint32
-          stack_size_axis: readonly uint32
-          stack_size_usb: readonly uint32
-          stack_size_uart: readonly uint32
-          stack_size_startup: readonly uint32
-          stack_size_can: readonly uint32
-          stack_size_analog: readonly uint32
-          prio_axis: readonly int32
-          prio_usb: readonly int32
-          prio_uart: readonly int32
-          prio_startup: readonly int32
-          prio_can: readonly int32
-          prio_analog: readonly int32
+          uptime: {type: readonly uint32, unit: ms, doc: Time since boot.}
+          min_heap_space: {type: readonly uint32, unit: bytes, doc: The smallest free heap seen since boot.}
+          max_stack_usage_axis: {type: readonly uint32, unit: bytes, doc: Highest stack use of the axis thread since boot.}
+          max_stack_usage_usb: {type: readonly uint32, unit: bytes, doc: Highest stack use of the USB thread since boot.}
+          max_stack_usage_uart: {type: readonly uint32, unit: bytes, doc: Highest stack use of the UART thread since boot.}
+          max_stack_usage_can: {type: readonly uint32, unit: bytes, doc: Highest stack use of the CAN thread since boot.}
+          max_stack_usage_startup: {type: readonly uint32, unit: bytes, doc: Highest stack use of the startup thread.}
+          max_stack_usage_analog: {type: readonly uint32, unit: bytes, doc: Highest stack use of the analog-input thread since boot.}
+          stack_size_axis: {type: readonly uint32, unit: bytes, doc: Stack size of the axis thread.}
+          stack_size_usb: {type: readonly uint32, unit: bytes, doc: Stack size of the USB thread.}
+          stack_size_uart: {type: readonly uint32, unit: bytes, doc: Stack size of the UART thread.}
+          stack_size_startup: {type: readonly uint32, unit: bytes, doc: Stack size of the startup thread.}
+          stack_size_can: {type: readonly uint32, unit: bytes, doc: "Stack size of the CAN thread: 4 KB, as USB's, because CAN endpoint access runs the same handlers."}
+          stack_size_analog: {type: readonly uint32, unit: bytes, doc: Stack size of the analog-input thread.}
+          prio_axis: {type: readonly int32, doc: FreeRTOS priority of the axis thread.}
+          prio_usb: {type: readonly int32, doc: FreeRTOS priority of the USB thread.}
+          prio_uart: {type: readonly int32, doc: FreeRTOS priority of the UART thread.}
+          prio_startup: {type: readonly int32, doc: FreeRTOS priority of the startup thread.}
+          prio_can: {type: readonly int32, doc: FreeRTOS priority of the CAN thread.}
+          prio_analog: {type: readonly int32, doc: FreeRTOS priority of the analog-input thread.}
           usb:
             c_is_class: False
             attributes:
-              rx_cnt: readonly uint32
-              tx_cnt: readonly uint32
-              tx_overrun_cnt: readonly uint32
+              rx_cnt: {type: readonly uint32, doc: USB packets received since boot.}
+              tx_cnt: {type: readonly uint32, doc: USB packets sent since boot.}
+              tx_overrun_cnt: {type: readonly uint32, doc: USB packets dropped because the transmit buffer was full.}
           i2c:
             c_is_class: False
             attributes:
-              addr: readonly uint8
-              addr_match_cnt: readonly uint32
-              rx_cnt: readonly uint32
-              error_cnt: readonly uint32
-      user_config_loaded: readonly uint32
+              addr: {type: readonly uint8, doc: The board's I2C address (I2C shares its pins with CAN; see `config.enable_i2c_a`).}
+              addr_match_cnt: {type: readonly uint32, doc: I2C transactions addressed to this board since boot.}
+              rx_cnt: {type: readonly uint32, doc: I2C transactions received since boot.}
+              error_cnt: {type: readonly uint32, doc: I2C errors since boot.}
+      user_config_loaded: {type: readonly uint32, unit: bytes, doc: "Size of the config loaded from flash at boot; 0 when none was loaded (for example after a flash that changed the config layout) and the defaults apply."}
       config_save_failed:
         type: readonly bool
         doc: |
@@ -181,43 +167,34 @@ interfaces:
         # TODO: make this a system error
         type: readonly bool
         doc: |
-          If this property is true, something is bad in the configuration. The
-          ODrive can still be used in this state but the user should investigate
-          which setting is problematic. This variable does not cover all
-          misconfigurations.
-
-          Possible causes:
-           - A GPIO was set to a mode that it doesn't support
-           - A GPIO was set to a mode for which the corresponding feature was
-             not enabled. Example: `GPIO_MODE_UART_A` was used without enabling
-             `config.enable_uart_a`.
-           - A feature was enabled which is not supported on this hardware.
-             Example: `config.enable_uart_c` set to true on ODrive v3.x.
-           - A GPIO was used as an interrupt input for two internal components
-             or two GPIOs that are mutually exclusive in their interrupt
-             capability were both used as interrupt input.
-             Example: `Axis:config.step_gpio_pin` of both axes were set to the same GPIO.
+          True when the config at boot has a problem the board could work around. The board
+          still runs, but a feature can be missing. Causes: a GPIO in a mode it doesn't support
+          (such as `GPIO_MODE_ENC1`'s number 12, which this firmware doesn't define); a GPIO in a
+          mode whose feature isn't enabled (`GPIO_MODE_UART_A` without `config.enable_uart_a`);
+          a feature the hardware lacks (`config.enable_uart_c`); or one GPIO used as an interrupt
+          input twice (`axis0.config.step_gpio_pin` and an endstop's `gpio_num` on the same GPIO).
+          It doesn't catch every misconfiguration.
             
       capture: {type: Capture}
       can: {type: Can}
-      test_property: uint32
-      otp_valid: readonly bool
+      test_property: {type: uint32, doc: A scratch value for testing the USB and CAN protocols; it has no effect.}
+      otp_valid: {type: readonly bool, doc: True when the MCU's one-time-programmable memory holds a hardware version record.}
       adc1_scan_enabled:
         type: readonly bool
-        doc: "XDRIVE diagnostics: whether ADC1's free-running 16-channel scan (thermistors, GPIO analog inputs) runs. See set_adc1_scan."
+        doc: "Diagnostics: whether ADC1's free-running 16-channel scan (thermistors, GPIO analog inputs) runs. See `set_adc1_scan`."
         
     functions:
       set_adc1_scan:
         in: {enable: bool}
         doc: |
-          XDRIVE diagnostics (RAM only): stop or restart ADC1's free-running regular scan. The bus-voltage
+          Diagnostics (RAM only): stop or restart ADC1's free-running regular scan. The bus-voltage
           sample (ADC1 injected, timer-triggered) keeps running. While stopped, thermistor and analog-input
           readings are frozen at their last value.
-      test_function: {in: {delta: int32},out: {cnt: int32}}
+      test_function: {in: {delta: int32},out: {cnt: int32}, doc: Adds delta to an internal counter and returns it; for testing the protocols.}
       get_adc_voltage: 
         in: {gpio: uint32}
         out: {voltage: float32}
-        doc: Reads the ADC voltage of the specified GPIO. The GPIO should be in `GPIO_MODE_ANALOG_IN`.}
+        doc: Reads the ADC voltage of the specified GPIO. The GPIO must be in `GPIO_MODE_ANALOG_IN`.
       save_configuration:
         out: {success: bool}
         doc: |
@@ -228,9 +205,11 @@ interfaces:
       erase_configuration:
         doc: Resets all `config` variables to their default values and reboots the controller
       reboot:
-        doc: Reboots the controller without saving the current configuraiton
+        doc: Reboots the board without saving the current configuration.
       enter_dfu_mode:
-        doc:  Enters the Device Firmware Update mode
+        doc: |
+          Resets into the STM32's built-in USB DFU bootloader (USB ID 0483:df11). Use it through
+          `tools/usb_flash.py`, which puts the axis in IDLE first and flashes the board.
       enter_can_bootloader:
         out: {success: bool}
         doc: |
@@ -262,7 +241,7 @@ interfaces:
       get_gpio_states:
         out: {status: {type: uint32}}
         doc: Returns the logic states of all GPIOs. Bit i represents the state of GPIOi.
-      get_drv_fault: {out: {drv_fault: uint32}}
+      get_drv_fault: {out: {drv_fault: uint32}, doc: "The DRV8301 gate driver's fault status word, read now (0: no fault)."}
       clear_errors:
         doc: Clear all the errors of this device including all contained submodules.
 
@@ -273,57 +252,24 @@ interfaces:
         type: bool
         brief: Enables/disables UART_A.
         doc: |
-          You also need to set the corresponding GPIOs to GPIO_MODE_UART_A.
-          Refer to [Hardware](hardware.md#gpios) to see which pins support UART_A.
-          Changing this requires a reboot.
+          The GPIOs must be in `GPIO_MODE_UART_A` as well (GPIO1 TX and GPIO2 RX, the default).
+          [Hardware](hardware.md#gpios) lists the pins. Takes effect after a save and reboot.
       enable_uart_b:
         type: bool
         brief: Enables/disables UART_B.
         doc: |
-          You also need to set the corresponding GPIOs to GPIO_MODE_UART_B.
-          Refer to [Hardware](hardware.md#gpios) to see which pins support UART_B.
-          Changing this requires a reboot.
+          The GPIOs must be in `GPIO_MODE_UART_B` as well (GPIO3 TX and GPIO4 RX).
+          [Hardware](hardware.md#gpios) lists the pins. Takes effect after a save and reboot.
       enable_uart_c: {type: bool, doc: Not supported on ODrive v3.x.}
       uart_a_baudrate:
         type: uint32
         unit: baud/s
         brief: Defines the baudrate used on the UART interface.
         doc: |
-          Some baudrates will have a small timing error due to hardware limitations.
-
-          Here's an (incomplete) list of baudrates for ODrive v3.x:
-          
-          +-------------+---------------+-----------+
-          | Configured  | Actual        | Error [%] |
-          +=============+===============+===========+
-          | 1.2 KBps    | 1.2 KBps      | 0         |
-          +-------------+---------------+-----------+
-          | 2.4 KBps    | 2.4 KBps      | 0         |
-          +-------------+---------------+-----------+
-          | 9.6 KBps    | 9.6 KBps      | 0         |
-          +-------------+---------------+-----------+
-          | 19.2 KBps   | 19.195 KBps   | 0.02      |
-          +-------------+---------------+-----------+
-          | 38.4 KBps   | 38.391 KBps   | 0.02      |
-          +-------------+---------------+-----------+
-          | 57.6 KBps   | 57.613 KBps   | 0.02      |
-          +-------------+---------------+-----------+
-          | 115.2 KBps  | 115.068 KBps  | 0.11      |
-          +-------------+---------------+-----------+
-          | 230.4 KBps  | 230.769 KBps  | 0.16      |
-          +-------------+---------------+-----------+
-          | 460.8 KBps  | 461.538 KBps  | 0.16      |
-          +-------------+---------------+-----------+
-          | 921.6 KBps  | 913.043 KBps  | 0.93      |
-          +-------------+---------------+-----------+
-          | 1.792 MBps  | 1.826 MBps    | 1.9       |
-          +-------------+---------------+-----------+
-          | 1.8432 MBps | 1.826 MBps    | 0.93      |
-          +-------------+---------------+-----------+
-
-
-          For more information refer to Section 30.3.4 and Table 142 (the column with f_PCLK = 42 MHz) in the
-          `STM datasheet <https://www.st.com/content/ccc/resource/technical/document/reference_manual/3d/6d/5a/66/b4/99/40/d4/DM00031020.pdf/files/DM00031020.pdf/jcr:content/translations/en.DM00031020.pdf>`__.
+          The UART clock (42 MHz) gives some rates a small error: 9600 and below are exact,
+          19200 to 57600 are off by 0.02 %, 115200 by 0.11 %, 230400 and 460800 by 0.16 %,
+          921600 by 0.93 %. The STM32F405 reference manual (RM0090, the USART baud rate tables
+          for f_PCLK = 42 MHz) lists every rate.
 
       uart_b_baudrate:
         type: uint32
@@ -345,41 +291,33 @@ interfaces:
       usb_cdc_protocol:
         type: StreamProtocolType
         doc: |
-          The protocol that's being run on the device's virtual COM port on
-          USB.
-          Note that the ODrive has two independent interfaces on USB: One
-          is the virtual COM port (affected by this option) and the other
-          one is a vendor specific interface which always runs Fibre.
-          So changing this option does not affect the working of odrivetool.
-      uart0_protocol: StreamProtocolType
-      uart1_protocol: StreamProtocolType
-      uart2_protocol: StreamProtocolType
+          The protocol on the board's USB virtual COM port. The board has a second,
+          vendor-specific USB interface that always runs Fibre, which the host tools
+          use, so this setting doesn't affect them.
+      uart0_protocol: {type: StreamProtocolType, doc: Protocol on UART_A.}
+      uart1_protocol: {type: StreamProtocolType, doc: Protocol on UART_B.}
+      uart2_protocol: {type: StreamProtocolType, doc: Protocol on UART_C, which ODrive v3.x boards lack.}
       max_regen_current: 
         type: float32
         unit: Amps
         doc: |
-          The bus current allowed to flow back to the power supply before the brake resistor module will start shunting current.
+          The bus current allowed to flow back to the power supply before the brake resistor starts absorbing current.
+          0 (the default) for a supply that can't sink current.
       brake_resistance:
         type: float32
         unit: ohm
         brief: Value of the brake resistor connected to the ODrive.
         doc: |
-          If you set this to a lower value than the true brake resistance
-          then the ODrive will not meed the `max_regen_current` constraint
-          during braking, that is it will sink more than `max_regen_current`
-          into the power supply. Some power supplies don't like this.
-
-          If you set this to a higher value than the true brake resistance
-          then the ODrive will unnecessarily burn more power than required
-          during braking.
+          Set lower than the true resistance, the board pushes more than
+          `max_regen_current` back into the power supply while braking. Set
+          higher, it burns more power in the resistor than needed.
       enable_brake_resistor:
         type: bool
         brief: Enable/disable the use of a brake resistor.
         doc: |
-          Setting this to False even though a brake resistor is connected is
-          harmless. Setting this to True even though no brake resistor is
-          connected can break the power supply.
-          Changes to this value require a reboot to take effect.
+          False (the default) with a resistor connected is harmless. True with no
+          resistor connected leaves regen nowhere to go but the supply.
+          Takes effect after a save and reboot.
 
       dc_bus_undervoltage_trip_level:
         type: float32
@@ -390,33 +328,24 @@ interfaces:
         unit: V
         brief: Maximum voltage above which the motor stops operating.
         doc: |
-          This protects against cases in which the power supply fails to dissipate
-          the brake power if the brake resistor is disabled.
-          The default is 26V for the 24V board version and 52V for the 48V board version.
+          Every motor disarms above it (`DC_BUS_OVER_VOLTAGE`). The default is 1.07 times the
+          board's voltage variant: 59.92 V on the Mini, next to its 60 V parts. Set it a few volts
+          above the supply voltage.
 
       enable_dc_bus_overvoltage_ramp:
         type: bool
         status: experimental
         brief: Enables the DC bus overvoltage ramp feature.
         doc: |
-          If enabled, if the measured DC voltage exceeds `dc_bus_overvoltage_ramp_start`,
-          the ODrive will sink more power than usual into the the brake resistor
-          in an attempt to bring the voltage down again.
-          
-          The brake duty cycle is increased by the following amount:
-
-           * `ODrive:vbus_voltage` == `dc_bus_overvoltage_ramp_start`  =>  brake_duty_cycle += 0%
-           * `ODrive:vbus_voltage` == `dc_bus_overvoltage_ramp_end`  =>  brake_duty_cycle += 100%
-          
-          Remarks:
-           - This feature is active even when all motors are disarmed.
-           - This feature is disabled if `brake_resistance` is non-positive.
+          Above `dc_bus_overvoltage_ramp_start`, the brake duty cycle rises linearly with the
+          bus voltage, by 0 % at the start voltage up to 100 % at `dc_bus_overvoltage_ramp_end`,
+          on top of the regen current. It works with every motor disarmed, and needs a positive
+          `brake_resistance`.
       dc_bus_overvoltage_ramp_start:
         type: float32
         status: experimental
         brief: See `enable_dc_bus_overvoltage_ramp`.
-        doc: Do not set this lower than your usual `ODrive:vbus_voltage`,
-          unless you like fried brake resistors.
+        doc: Set it above the supply voltage; below it, the brake resistor runs continuously.
       dc_bus_overvoltage_ramp_end:
         type: float32
         status: experimental
@@ -433,10 +362,9 @@ interfaces:
         unit: A
         brief: Max current the power supply can sink.
         doc: |
-          You most likely want a non-positive value here. Set to -INFINITY to disable.
-          Note: This should be greater in magnitude than `max_regen_current`
+          Zero or negative. -inf disables the check. Its magnitude must exceed `max_regen_current`.
 
-      error_gpio_pin: {type: uint32}
+      error_gpio_pin: {type: uint32, doc: "GPIO in `GPIO_MODE_STATUS` that signals an error; 0 (the default) for none."}
 
       gpio3_analog_mapping: {type: Endpoint, c_name: 'analog_mappings[3]', doc: Make sure the corresponding GPIO is in `GPIO_MODE_ANALOG_IN`.}
       gpio4_analog_mapping: {type: Endpoint, c_name: 'analog_mappings[4]', doc: Make sure the corresponding GPIO is in `GPIO_MODE_ANALOG_IN`.}
@@ -445,26 +373,29 @@ interfaces:
     c_is_class: True
     attributes:
       error:
+        doc: "CAN errors (bits in `Can.Error`)."
         nullflag: NONE
-        flags: {DUPLICATE_CAN_IDS: }
+        flags: {DUPLICATE_CAN_IDS: {doc: Not raised by this firmware.}}
       config:
         c_is_class: False
         attributes:
-          baud_rate: {type: uint32, c_setter: 'set_baud_rate'}
+          baud_rate: {type: uint32, unit: bit/s, c_setter: 'set_baud_rate', doc: "CAN bit rate: a rate that divides 2 MHz evenly, such as 1000000, 500000 or 250000 (the default). Other values are ignored."}
           protocol:
             type: Protocol
+            doc: "Protocols on the bus: 1 (`SIMPLE`, CANSimple; the default). 0 turns CAN messaging off. Makerbase's v0.5.1 numbered CANSimple 0, so a config carried over from it needs this set to 1."
 
   ODrive.Endpoint:
     c_is_class: False
     attributes:
-      endpoint: endpoint_ref
-      min: float32
-      max: float32
+      endpoint: {type: endpoint_ref, doc: The property the input drives (for example `axis0.controller.input_pos`).}
+      min: {type: float32, doc: The property's value at the input's lowest level.}
+      max: {type: float32, doc: The property's value at the input's highest level.}
 
   ODrive.Axis:
     c_is_class: True
     attributes:
       error:
+        doc: "The axis's errors (bits in `Axis.Error`); also sent in the CAN heartbeat. `MOTOR_FAILED`, `ENCODER_FAILED` and `CONTROLLER_FAILED` point to the sub-object's own `error`."
         nullflag: NONE
         flags:
           INVALID_STATE:
@@ -478,9 +409,11 @@ interfaces:
             bit: 6
             doc: Check `motor.error` for more information.
           SENSORLESS_ESTIMATOR_FAILED:
+            doc: Check `sensorless_estimator.error` for more information.
           ENCODER_FAILED:
             doc: Check `encoder.error` for more information.
           CONTROLLER_FAILED:
+            doc: Check `controller.error` for more information. Set together with a controller fault, such as a following error or a soft limit violation.
           WATCHDOG_TIMER_EXPIRED:
             bit: 11
             brief: The axis watchdog timer expired.
@@ -501,8 +434,8 @@ interfaces:
             doc: Check `motor.error` for more details.
           UNKNOWN_POSITION:
             doc: There isn't a valid position estimate available.
-      step_dir_active: readonly bool
-      last_drv_fault: readonly uint32
+      step_dir_active: {type: readonly bool, doc: True while the step/direction input drives `input_pos`.}
+      last_drv_fault: {type: readonly uint32, doc: "The gate driver's fault word, latched when the motor last disarmed with `DRV_FAULT`."}
       steps: 
         type: readonly int64
         brief: The current commanded position, in steps, while in `step_dir` mode
@@ -549,32 +482,33 @@ interfaces:
               This is ignored if enable_step_dir is false.
               This setting only takes effect on a state transition
               into idle or out of closed loop control.
-          enable_sensorless_mode: bool
+          enable_sensorless_mode: {type: bool, doc: Run closed loop from the sensorless estimator instead of the encoder (untested on the Mini).}
           watchdog_timeout:
             type: float32
             unit: s
-          enable_watchdog: bool
+            doc: The watchdog expires when nothing feeds it for this long. USB `watchdog_feed()` and every CAN frame addressed to the board feed it.
+          enable_watchdog: {type: bool, doc: "Arms the watchdog (default false). `watchdog_action` sets what an expiry does."}
           watchdog_action:
             type: WatchdogAction
-            doc: "XDRIVE: what the axis does in closed loop when the watchdog expires."
+            doc: "What the axis does in closed loop when the watchdog expires. Default: `DECEL_HOLD`."
           watchdog_decel:
             type: float32
             unit: turn/s^2
-            doc: "XDRIVE: deceleration for watchdog_action = DECEL_HOLD."
+            doc: "Deceleration for `watchdog_action` = `DECEL_HOLD`. Default 10."
           watchdog_torque_lim:
             type: float32
             unit: N·m
-            doc: "XDRIVE: torque cap while decelerating and holding after a watchdog timeout. Infinity = the normal limit."
-          step_gpio_pin: {type: uint16, c_setter: 'set_step_gpio_pin'}
-          dir_gpio_pin: {type: uint16, c_setter: 'set_dir_gpio_pin'}
+            doc: "Torque cap while decelerating and holding after a watchdog timeout. Infinity (the default) keeps the normal limit."
+          step_gpio_pin: {type: uint16, c_setter: 'set_step_gpio_pin', doc: "GPIO of the step input; it must be in a `GPIO_MODE_DIGITAL` mode."}
+          dir_gpio_pin: {type: uint16, c_setter: 'set_dir_gpio_pin', doc: "GPIO of the direction input; it must be in a `GPIO_MODE_DIGITAL` mode."}
           calibration_lockin: # TODO: this is a subset of lockin state
             c_is_class: False
             attributes:
-              current: float32
-              ramp_time: float32
-              ramp_distance: float32
-              accel: float32
-              vel: float32
+              current: {type: float32, unit: A, doc: Current of the open-loop vector that turns the rotor during encoder direction search.}
+              ramp_time: {type: float32, unit: s, doc: Time to ramp the current up.}
+              ramp_distance: {type: float32, unit: rad, doc: Electrical angle covered while the current ramps up.}
+              accel: {type: float32, unit: rad/s^2, doc: Electrical acceleration after the ramp.}
+              vel: {type: float32, unit: rad/s, doc: Final electrical velocity.}
           sensorless_ramp: LockinConfig
           general_lockin: LockinConfig
           can: CanConfig
@@ -613,45 +547,51 @@ interfaces:
       current:
         type: float32
         unit: A
+        doc: Current of the open-loop vector that turns the rotor.
       ramp_time:
         type: float32
         unit: s
+        doc: Time to ramp the current up at standstill.
       ramp_distance:
         type: float32
         unit: rad
+        doc: Electrical angle covered while the current ramps up.
       accel:
         type: float32
         unit: rad/s^2
+        doc: Electrical acceleration after the ramp.
       vel:
         type: float32
         unit: rad/s
+        doc: Electrical velocity at which the lock-in stops accelerating.
       finish_distance:
         type: float32
         unit: rad
-      finish_on_vel: bool
-      finish_on_distance: bool
-      finish_on_enc_idx: bool
+        doc: Electrical angle after which the lock-in ends, when `finish_on_distance` is set.
+      finish_on_vel: {type: bool, doc: End the lock-in on reaching `vel`.}
+      finish_on_distance: {type: bool, doc: End the lock-in after `finish_distance`.}
+      finish_on_enc_idx: {type: bool, doc: End the lock-in when the encoder index is found.}
 
   ODrive.Axis.CanConfig:
     c_is_class: False
     attributes:
-      node_id: uint32
-      is_extended: bool
-      heartbeat_rate_ms: uint32
-      encoder_rate_ms: uint32
-      motor_error_rate_ms: uint32
-      encoder_error_rate_ms: uint32
-      controller_error_rate_ms: uint32
-      sensorless_error_rate_ms: uint32
-      encoder_count_rate_ms: uint32
-      iq_rate_ms: uint32
-      sensorless_rate_ms: uint32
-      bus_vi_rate_ms: uint32
-      impedance_pos_range: {type: float32, unit: turn, doc: "XDRIVE: full scale (+/-) of the position fields of the impedance command and reply (MSG_IMPEDANCE, 16 bit). Positions beyond it saturate."}
-      impedance_vel_range: {type: float32, unit: turn/s, doc: "XDRIVE: full scale (+/-) of the velocity fields of the impedance command and reply (12 bit)."}
-      impedance_kp_max: {type: float32, unit: N·m/turn, doc: "XDRIVE: full scale of the impedance command's kp field (12 bit, 0..max)."}
-      impedance_kd_max: {type: float32, unit: N·m/(turn/s), doc: "XDRIVE: full scale of the impedance command's kd field (12 bit, 0..max)."}
-      impedance_torque_range: {type: float32, unit: N·m, doc: "XDRIVE: full scale (+/-) of the torque fields of the impedance command and reply (12 bit)."}
+      node_id: {type: uint32, doc: "The board's CAN node ID: 0 to 63 with standard IDs, different on every board on a bus. Default 0."}
+      is_extended: {type: bool, doc: Use 29-bit extended IDs instead of 11-bit standard IDs (default false).}
+      heartbeat_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Heartbeat message (0x001); 0 turns it off. Default 100.}
+      encoder_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Encoder Estimates message (0x009); 0 turns it off. Default 10.}
+      motor_error_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Motor Error message (0x003); 0 (the default) turns it off.}
+      encoder_error_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Encoder Error message (0x004); 0 (the default) turns it off.}
+      controller_error_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Controller Error message (0x01D); 0 (the default) turns it off.}
+      sensorless_error_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Sensorless Error message (0x005); 0 (the default) turns it off.}
+      encoder_count_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Encoder Count message (0x00A); 0 (the default) turns it off.}
+      iq_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Iq message (0x014); 0 (the default) turns it off.}
+      sensorless_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Sensorless Estimates message (0x015); 0 (the default) turns it off.}
+      bus_vi_rate_ms: {type: uint32, unit: ms, doc: Period of the cyclic Get Bus Voltage and Current message (0x017); 0 (the default) turns it off.}
+      impedance_pos_range: {type: float32, unit: turn, doc: "Full scale (+/-) of the position fields of the CAN impedance command and reply (0x01E, 16 bit). Positions beyond it saturate. Default 16."}
+      impedance_vel_range: {type: float32, unit: turn/s, doc: "Full scale (+/-) of the velocity fields of the impedance command and reply (12 bit). Default 32."}
+      impedance_kp_max: {type: float32, unit: N·m/turn, doc: "Full scale of the impedance command's kp field (12 bit, 0 to max). Default 200."}
+      impedance_kd_max: {type: float32, unit: N·m/(turn/s), doc: "Full scale of the impedance command's kd field (12 bit, 0 to max). Default 2."}
+      impedance_torque_range: {type: float32, unit: N·m, doc: "Full scale (+/-) of the torque fields of the impedance command and reply (12 bit). Default 4."}
 
   ODrive.ThermistorCurrentLimiter:
     c_is_class: False
@@ -662,6 +602,7 @@ interfaces:
       temperature:
         type: readonly float32
         unit: °C
+        doc: Temperature of the power stage, from the onboard FET thermistor.
       config:
         c_is_class: False
         attributes:
@@ -679,14 +620,15 @@ interfaces:
       temperature:
         type: readonly float32
         unit: °C
+        doc: Temperature from a motor thermistor on an analog GPIO, when enabled.
       config:
         c_is_class: False
         attributes:
-          gpio_pin: {type: uint16, c_setter: set_gpio_pin}
-          poly_coefficient_0: {type: float32, c_name: 'thermistor_poly_coeffs[0]'}
-          poly_coefficient_1: {type: float32, c_name: 'thermistor_poly_coeffs[1]'}
-          poly_coefficient_2: {type: float32, c_name: 'thermistor_poly_coeffs[2]'}
-          poly_coefficient_3: {type: float32, c_name: 'thermistor_poly_coeffs[3]'}
+          gpio_pin: {type: uint16, c_setter: set_gpio_pin, doc: "The analog GPIO the thermistor divider connects to; it must be in `GPIO_MODE_ANALOG_IN`."}
+          poly_coefficient_0: {type: float32, c_name: 'thermistor_poly_coeffs[0]', doc: "Temperature = c0 x^3 + c1 x^2 + c2 x + c3, where x is the GPIO voltage as a fraction of 3.3 V. This is c0."}
+          poly_coefficient_1: {type: float32, c_name: 'thermistor_poly_coeffs[1]', doc: c1 of the polynomial above.}
+          poly_coefficient_2: {type: float32, c_name: 'thermistor_poly_coeffs[2]', doc: c2 of the polynomial above.}
+          poly_coefficient_3: {type: float32, c_name: 'thermistor_poly_coeffs[3]', doc: c3 of the polynomial above.}
           temp_limit_lower: 
             type: float32
             doc: The lower limit when the controller starts limiting current.
@@ -698,8 +640,9 @@ interfaces:
   ODrive.Motor:
     c_is_class: True
     attributes:
-      last_error_time: float32
+      last_error_time: {type: float32, unit: s, doc: Time since boot of the motor's last error.}
       error:
+        doc: "The motor's errors (bits in `Motor.Error`, 64 bits wide: CAN endpoint access can't read it; use Get Motor Error, 0x003)."
         nullflag: NONE
         flags:
           PHASE_RESISTANCE_OUT_OF_RANGE:
@@ -711,28 +654,14 @@ interfaces:
               range this error will be returned. Check that all motor leads are
               connected securely.
 
-              The measured values can be viewed using odrivetool as is shown below:
-              ```
-              In [2]: odrv0.axis0.motor.config.phase_inductance
-              Out[2]: 1.408751450071577e-05
+              The measured values are in `config.phase_resistance` and
+              `config.phase_inductance`.
+              Small or gimbal motors can measure far outside the expected range:
+              raise `config.resistance_calib_max_voltage` (default 2 V) or lower
+              `config.calibration_current` (default 10 A), then calibrate again.
 
-              In [3]: odrv0.axis0.motor.config.phase_resistance
-              Out[3]: 0.029788672924041748
-              ```
-              Some motors will have a considerably different phase resistance
-              and inductance than this. For example, gimbal motors, some small
-              motors (e.g. < 10A peak current). If you think this applies to you
-              try increasing `config.resistance_calib_max_voltage` from
-              its default value of 1 using odrivetool and repeat the motor
-              calibration process. If your motor has a small peak current draw
-              (e.g. < 20A) you can also try decreasing
-              `config.calibration_current` from its default value of 10A.
-
-              In general, you need
-              ```text
-              resistance_calib_max_voltage > calibration_current * phase_resistance
-              resistance_calib_max_voltage < 0.5 * vbus_voltage
-              ```
+              In general, the calibration needs `resistance_calib_max_voltage` above
+              `calibration_current` x `phase_resistance` and below half of `vbus_voltage`.
           PHASE_INDUCTANCE_OUT_OF_RANGE:
             brief: The measured motor phase inductance is outside of the plausible range.
             doc: |
@@ -741,20 +670,11 @@ interfaces:
             bit: 3
             brief: The gate driver chip reported an error.
             doc: |
-              The ODrive v3.4 is known to have a hardware issue whereby the
-              motors would stop operating when applying high currents to M0. The
-              reported error of both motors in this case is `ERROR_DRV_FAULT`.
-
-              The conjecture is that the high switching current creates large
-              ripples in the power supply of the DRV8301 gate driver chips, thus
-              tripping its under-voltage fault detection.
-
-              To resolve this issue you can limit the M0 current to 40A. The
-              lowest current at which the DRV fault was observed is 45A on one
-              test motor and 50A on another test motor. Refer to
-              [this post](https://discourse.odriverobotics.com/t/drv-fault-on-odrive-v3-4/558)
-              for instructions for a hardware fix.
+              The DRV8301 reported a fault (for example gate-drive undervoltage or
+              overcurrent), and the motor disarmed. `axis0.last_drv_fault` holds the
+              fault word from that moment.
           CONTROL_DEADLINE_MISSED:
+            doc: The control loop didn't finish within its 125 µs period. A debugger halt causes it too.
           MODULATION_MAGNITUDE:
             bit: 7
             doc: |
@@ -764,9 +684,9 @@ interfaces:
               `config.resistance_calib_max_voltage` is no more than half
               your bus voltage.
 
-              For gimbal motors, it is recommended to set the
-              `config.calibration_current` and `config.current_lim`
-              to half your bus voltage, or less.
+              For gimbal motors, set `config.calibration_current` and
+              `config.current_lim` (volts for a gimbal motor) to half the bus
+              voltage or less.
           CURRENT_SENSE_SATURATION:
             bit: 10
             doc: |
@@ -782,7 +702,7 @@ interfaces:
               are automatically calculated based on `config.current_control_bandwidth` and the
               motor resistance and inductance (pole placement). Some overshoot is normal, so a sensible
               solution is to increase the current limit margin if your current limit is large.
-          MODULATION_IS_NAN: {bit: 16}
+          MODULATION_IS_NAN: {bit: 16, doc: The current controller computed a PWM duty cycle that was not a number.}
           MOTOR_THERMISTOR_OVER_TEMP: {doc: The motor thermistor measured a temperature above motor.motor_thermistor.config.temp_limit_upper}
           FET_THERMISTOR_OVER_TEMP: {doc: The inverter thermistor measured a temperature above motor.fet_thermistor.config.temp_limit_upper}
           TIMER_UPDATE_MISSED: {doc: A timer update event was missed. Perhaps the previous timer update took too much time. This is not expected in official release firmware.}
@@ -798,13 +718,10 @@ interfaces:
               An attempt was made to run the motor PWM while the brake resistor was configured as enabled
               (`config.enable_brake_resistor`) but disarmed.
 
-              The most common cause is that you just set `config.enable_brake_resistor` to `True` but didn't
-              arm the brake resistor yet (by either rebooting or running `odrvX.clear_errors()`).
+              The most common cause: `config.enable_brake_resistor` was set to `True` without a save and reboot.
 
-              Otherwise, the brake resistor can be disarmed due to various system-wide errors.
-              The root cause will usually show up under `system` when you run `dump_errors(odrvX)`.
-
-              To re-arm the brake resistor reboot the ODrive or run `odrvX.clear_errors()`.
+              Otherwise a system-wide error disarmed the brake resistor; the board's `error` shows it
+              (`tools/dump_board.py` decodes it). A reboot or `clear_errors()` re-arms the brake resistor.
           SYSTEM_LEVEL:
             doc: |
               The motor had to be disarmed because of a system level error.
@@ -820,16 +737,16 @@ interfaces:
           UNKNOWN_GAINS: {doc: The current controller gains were not configured. Run motor calibration or set `config.phase_resistance` and `config.phase_inductance` manually.}
           CONTROLLER_INITIALIZING: {doc: Internal value used while the controller is not yet ready to generate PWM timings.}
           UNBALANCED_PHASES: {doc: The motor phases are not balanced.}
-      is_armed: readonly bool
-      is_calibrated: readonly bool
-      current_meas_phA: {type: readonly float32, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phA'}
-      current_meas_phB: {type: readonly float32, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phB'}
-      current_meas_phC: {type: readonly float32, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phC'}
-      DC_calib_phA: {type: float32, c_name: DC_calib_.phA}
-      DC_calib_phB: {type: float32, c_name: DC_calib_.phB}
-      DC_calib_phC: {type: float32, c_name: DC_calib_.phC}
+      is_armed: {type: readonly bool, doc: True while the gate driver switches the motor's phases.}
+      is_calibrated: {type: readonly bool, doc: True once phase resistance and inductance are known (measured, or `config.pre_calibrated`).}
+      current_meas_phA: {type: readonly float32, unit: A, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phA', doc: "Phase A current; the Mini has no phase A shunt, so this is -(B + C)."}
+      current_meas_phB: {type: readonly float32, unit: A, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phB', doc: Phase B current, measured.}
+      current_meas_phC: {type: readonly float32, unit: A, c_getter: 'current_meas_.value_or(Iph_ABC_t{0.0f, 0.0f, 0.0f}).phC', doc: Phase C current, measured.}
+      DC_calib_phA: {type: float32, unit: A, c_name: DC_calib_.phA, doc: Offset of the phase A current measurement, tracked at the top of each PWM period, when no current flows through the shunts.}
+      DC_calib_phB: {type: float32, unit: A, c_name: DC_calib_.phB, doc: Offset of the phase B current measurement.}
+      DC_calib_phC: {type: float32, unit: A, c_name: DC_calib_.phC, doc: Offset of the phase C current measurement.}
       I_bus: {type: readonly float32, unit: A, doc: The current in the ODrive DC bus.  This is also the current seen by the power supply in most systems.}
-      phase_current_rev_gain: float32
+      phase_current_rev_gain: {type: float32, doc: "Inverse gain of the current sense amplifiers, set from `config.requested_current_range`."}
       effective_current_lim: 
         type: readonly float32
         unit: A
@@ -842,23 +759,23 @@ interfaces:
           Indicates the maximum current that can be measured by the current
           sensors in the current hardware configuration. This value depends on
           `config.requested_current_range`.
-      max_dc_calib: {type: readonly float32, unit: A}
+      max_dc_calib: {type: readonly float32, unit: A, doc: "Largest current-measurement offset accepted as valid: 10 % of `max_allowed_current`."}
       fet_thermistor: OnboardThermistorCurrentLimiter
       motor_thermistor: OffboardThermistorCurrentLimiter
       current_control:
         c_is_class: True
         attributes:
-          p_gain: {type: readonly float32, c_getter: 'pi_gains_.value_or(float2D{0.0f, 0.0f}).first'}
-          i_gain: {type: readonly float32, c_getter: 'pi_gains_.value_or(float2D{0.0f, 0.0f}).second'}
-          I_measured_report_filter_k: float32
-          Id_setpoint: {type: readonly float32, c_getter: 'Idq_setpoint_.value_or(float2D{0.0f, 0.0f}).first'}
-          Iq_setpoint: {type: readonly float32, c_getter: 'Idq_setpoint_.value_or(float2D{0.0f, 0.0f}).second'}
-          Vd_setpoint: {type: readonly float32, c_getter: 'Vdq_setpoint_.value_or(float2D{0.0f, 0.0f}).first'}
-          Vq_setpoint: {type: readonly float32, c_getter: 'Vdq_setpoint_.value_or(float2D{0.0f, 0.0f}).second'}
-          phase: {type: readonly float32, c_getter: 'phase_.value_or(0.0f)'}
-          phase_vel: {type: readonly float32, c_getter: 'phase_vel_.value_or(0.0f)'}
-          Ialpha_measured: {type: readonly float32, c_getter: 'Ialpha_beta_measured_.value_or(float2D{0.0f, 0.0f}).first'}
-          Ibeta_measured: {type: readonly float32, c_getter: 'Ialpha_beta_measured_.value_or(float2D{0.0f, 0.0f}).second'}
+          p_gain: {type: readonly float32, unit: V/A, c_getter: 'pi_gains_.value_or(float2D{0.0f, 0.0f}).first', doc: "Proportional gain of the current loop: `current_control_bandwidth` x phase inductance."}
+          i_gain: {type: readonly float32, unit: V/(A·s), c_getter: 'pi_gains_.value_or(float2D{0.0f, 0.0f}).second', doc: "Integral gain of the current loop: `current_control_bandwidth` x phase resistance."}
+          I_measured_report_filter_k: {type: float32, doc: "Filter gain for the reported `Id_measured` and `Iq_measured` (1 = unfiltered). Affects only the reported values."}
+          Id_setpoint: {type: readonly float32, unit: A, c_getter: 'Idq_setpoint_.value_or(float2D{0.0f, 0.0f}).first', doc: "d-axis current setpoint (non-zero with flux braking or the bus current soft limits)."}
+          Iq_setpoint: {type: readonly float32, unit: A, c_getter: 'Idq_setpoint_.value_or(float2D{0.0f, 0.0f}).second', doc: q-axis (torque) current setpoint.}
+          Vd_setpoint: {type: readonly float32, unit: V, c_getter: 'Vdq_setpoint_.value_or(float2D{0.0f, 0.0f}).first', doc: d-axis voltage feed-forward.}
+          Vq_setpoint: {type: readonly float32, unit: V, c_getter: 'Vdq_setpoint_.value_or(float2D{0.0f, 0.0f}).second', doc: q-axis voltage feed-forward.}
+          phase: {type: readonly float32, unit: rad, c_getter: 'phase_.value_or(0.0f)', doc: Electrical angle the current loop commutates at.}
+          phase_vel: {type: readonly float32, unit: rad/s, c_getter: 'phase_vel_.value_or(0.0f)', doc: Electrical angular velocity.}
+          Ialpha_measured: {type: readonly float32, unit: A, c_getter: 'Ialpha_beta_measured_.value_or(float2D{0.0f, 0.0f}).first', doc: Measured current in the stator's alpha axis.}
+          Ibeta_measured: {type: readonly float32, unit: A, c_getter: 'Ialpha_beta_measured_.value_or(float2D{0.0f, 0.0f}).second', doc: Measured current in the stator's beta axis.}
           Id_measured: 
             type: readonly float32
             unit: A
@@ -874,14 +791,14 @@ interfaces:
             unit: W
             doc: |
               The electrical power being delivered to the motor
-          v_current_control_integral_d: float32
-          v_current_control_integral_q: float32
-          final_v_alpha: readonly float32
-          final_v_beta: readonly float32
+          v_current_control_integral_d: {type: float32, unit: V, doc: State of the d-axis current loop's integrator.}
+          v_current_control_integral_q: {type: float32, unit: V, doc: State of the q-axis current loop's integrator.}
+          final_v_alpha: {type: readonly float32, unit: V, doc: Output voltage in the alpha axis, after modulation limits.}
+          final_v_beta: {type: readonly float32, unit: V, doc: Output voltage in the beta axis, after modulation limits.}
       n_evt_current_measurement: {type: readonly uint32, doc: Number of current measurement events since startup (modulo 2^32)}
       n_evt_pwm_update: {type: readonly uint32, doc: Number of PWM update events since startup (modulo 2^32)}
-      spike_count: {type: readonly uint32, doc: "XDRIVE diagnostics: control periods (while armed) in which the measured current vector jumped by more than spike_threshold from the previous period. A one-period glitch counts twice (out and back)."}
-      spike_threshold: {type: float32, unit: A, doc: "XDRIVE diagnostics (RAM only): jump threshold for spike_count."}
+      spike_count: {type: readonly uint32, doc: "Diagnostics: control periods (while armed) in which the measured current vector jumped by more than spike_threshold from the previous period. A one-period glitch counts twice (out and back)."}
+      spike_threshold: {type: float32, unit: A, doc: "Diagnostics (RAM only): jump threshold for `spike_count`."}
 
       config:
         c_is_class: False
@@ -905,10 +822,10 @@ interfaces:
             doc: |
               The maximum voltage allowed during `AXIS_STATE_MOTOR_CALIBRATION`.
               This should be set to less than `(0.5 * vbus_voltage)`, but high enough to satisfy V=IR during motor calibration, where I is `config.calibration_current` and R is `config.phase_resistance`
-          phase_inductance: {type: float32, unit: henry, c_setter: set_phase_inductance}
-          phase_resistance: {type: float32, unit: ohm, c_setter: set_phase_resistance}
-          torque_constant: {type: float32, unit: N·m/A}
-          motor_type: MotorType
+          phase_inductance: {type: float32, unit: henry, c_setter: set_phase_inductance, doc: "Measured by `AXIS_STATE_MOTOR_CALIBRATION`; sets the current loop's gains."}
+          phase_resistance: {type: float32, unit: ohm, c_setter: set_phase_resistance, doc: "Measured by `AXIS_STATE_MOTOR_CALIBRATION`; sets the current loop's gains."}
+          torque_constant: {type: float32, unit: N·m/A, doc: "Torque per amp of q-axis current: 8.27 / KV (0.1074 for a 77 KV DJI 10018). The default, 0.04, makes every torque setting act 2.7 times stronger in amps on a 10018."}
+          motor_type: {type: MotorType, doc: "`HIGH_CURRENT` (the default) for brushless motors driven by current control."}
           current_lim: 
             type: float32
             unit: A
@@ -916,7 +833,7 @@ interfaces:
           current_lim_margin: 
             type: float32
             unit: A
-            doc: Maximum measured current allowed above `current_lim`.  Any value above `current_lim + curren_lim_margin` will throw a `CURRENT_LIMIT_VIOLATION` error.
+            doc: Measured current allowed above `current_lim`. Above `current_lim + current_lim_margin`, the motor disarms with `CURRENT_LIMIT_VIOLATION`.
           torque_lim: 
             type: float32
             unit: N·m
@@ -934,7 +851,7 @@ interfaces:
             unit: A
             doc: |
               The minimum phase current range expected to be measured.  This is used to set the current shunt amplifier gains.
-              This should be set > `current_lim + curren_lim_margin`, but as low as possible to maximize precision and accuracy of the controller.
+              Set it above `current_lim + current_lim_margin`, but as low as possible for resolution. At 20 A the measurement saturates at about 33.8 A. Takes effect after a save and reboot.
           current_control_bandwidth: 
             type: float32
             c_setter: set_current_control_bandwidth
@@ -942,11 +859,11 @@ interfaces:
             doc: |
               Sets the PI gains of the Q and D axis FOC control according to `phase_resistance` and `phase_inductance` to create a critically-damped controller with a -3dB
               bandwidth at this frequency.
-          acim_gain_min_flux: float32
-          acim_autoflux_min_Id: float32
-          acim_autoflux_enable: bool
-          acim_autoflux_attack_gain: float32
-          acim_autoflux_decay_gain: float32
+          acim_gain_min_flux: {type: float32, doc: AC induction motors only (untested on the Mini).}
+          acim_autoflux_min_Id: {type: float32, unit: A, doc: AC induction motors only.}
+          acim_autoflux_enable: {type: bool, doc: AC induction motors only.}
+          acim_autoflux_attack_gain: {type: float32, doc: AC induction motors only.}
+          acim_autoflux_decay_gain: {type: float32, doc: AC induction motors only.}
           R_wL_FF_enable: 
             type: bool
             doc: Enables automatic feedforward of the R*wL term in the current controller.
@@ -960,7 +877,7 @@ interfaces:
               If the controller fails to keep this motor's DC current (`ODrive.Motor:I_bus`)
               above this value the motor gets disarmed immediately. Most likely
               you want a negative value here. Set to -inf to disable. Take noise
-              into account when chosing a value.
+              into account when choosing a value.
           I_bus_hard_max:
             type: float32
             unit: A
@@ -968,12 +885,12 @@ interfaces:
               If the controller fails to keep this motor's DC current (`ODrive.Motor:I_bus`)
               below this value the motor gets disarmed immediately. Usually this
               is set in conjunction with `I_bus_hard_min`. Set to inf to disable.
-              Take noise into account when chosing a value.
+              Take noise into account when choosing a value.
           I_bus_soft_min:
             type: float32
             unit: A
             doc: |
-              XDRIVE: lowest bus current (most regen) the motor aims for. Each control period the
+              Lowest bus current (most regen) the motor aims for. Each control period the
               torque current is clamped so that the predicted bus current,
               1.5 * (R * (Id^2 + Iq^2) + back-EMF * Iq) / vbus, stays at or above this value.
               Values above 0 count as 0. Braking at speed is limited to what copper losses
@@ -982,21 +899,21 @@ interfaces:
             type: float32
             unit: A
             doc: |
-              XDRIVE: highest bus current the motor aims for, by the same prediction as
+              Highest bus current the motor aims for, by the same prediction as
               `I_bus_soft_min`; caps this board's draw from a shared supply. Values below 0 count
               as 0. inf (default) disables it.
           flux_brake_start_voltage:
             type: float32
             unit: V
             doc: |
-              XDRIVE: flux braking. Above this bus voltage the motor adds d-axis current
+              Flux braking: above this bus voltage the motor adds d-axis current
               Id = -flux_brake_gain * (vbus - start), up to the current limit, to burn bus energy in
               the windings (1.5 * R * Id^2). Set it a little above the supply voltage and below
               `dc_bus_overvoltage_trip_level`. inf (default) disables it.
           flux_brake_gain:
             type: float32
             unit: A/V
-            doc: "XDRIVE: flux-braking d-axis current per volt above `flux_brake_start_voltage`."
+            doc: "Flux-braking d-axis current per volt above `flux_brake_start_voltage`."
           I_leak_max:
             type: float32
             unit: A
@@ -1006,26 +923,25 @@ interfaces:
               However if the sum of A, B, C currents exceeds this configuration
               value, the motor gets disarmed immediately.
 
-              Note that this feature is only works on devices with three current
-              sensors (e.g. ODrive v4).
-          dc_calib_tau: float32
+              This check needs three current sensors; the Mini has two, so it has no effect there.
+          dc_calib_tau: {type: float32, unit: s, doc: Time constant of the filter that tracks the current-measurement offsets.}
     functions:
       get_spike_n:
         in: {index: uint32}
         out: {n: uint32}
-        doc: "XDRIVE diagnostics: odrv.n_evt_control_loop at spike event `index` (0..31, ring buffer; event k is at k % 32)."
+        doc: "Diagnostics: `n_evt_control_loop` at spike event `index` (0..31, ring buffer; event k is at k % 32)."
       get_spike_db:
         in: {index: uint32}
         out: {val: float32}
-        doc: "XDRIVE diagnostics: phase-B current change [A] at spike event `index`."
+        doc: "Diagnostics: phase B current change [A] at spike event `index`."
       get_spike_dc:
         in: {index: uint32}
         out: {val: float32}
-        doc: "XDRIVE diagnostics: phase-C current change [A] at spike event `index`."
+        doc: "Diagnostics: phase C current change [A] at spike event `index`."
 
   ODrive.Capture:
     c_is_class: True
-    brief: "XDRIVE: configurable high-rate capture of up to 8 properties into RAM."
+    brief: "High-rate capture of up to 8 properties into RAM."
     doc: |
       Every `decimation` control periods (8 kHz), the control loop reads the chosen properties
       (`add_channel`, by endpoint ID) into a 32 KiB ring buffer. After the trigger, `post_trigger`
@@ -1035,16 +951,16 @@ interfaces:
       sample is frame `trigger_index`. Settings are RAM only.
     attributes:
       decimation: {type: uint32, doc: "Record one sample every `decimation` control periods."}
-      trigger_mode: CaptureTrigger
+      trigger_mode: {type: CaptureTrigger, doc: "What starts the post-trigger recording: `IMMEDIATE`, a `RISING` or `FALLING` level crossing, or `MANUAL` (`trigger()`)."}
       trigger_channel: {type: uint32, doc: "Channel (in add_channel order) watched by the RISING and FALLING triggers."}
       trigger_level: {type: float32, doc: "Level for the RISING and FALLING triggers, in the channel's own unit."}
       post_trigger: {type: uint32, doc: "Samples recorded after the trigger sample; start() clamps it to capacity - 1."}
-      state: readonly CaptureState
-      n_channels: readonly uint32
+      state: {type: readonly CaptureState, doc: "`IDLE`, `ARMED`, `TRIGGERED` or `DONE`."}
+      n_channels: {type: readonly uint32, doc: Channels added with `add_channel`.}
       capacity: {type: readonly uint32, doc: "Frames the buffer holds: 8192 / n_channels."}
       n_samples: {type: readonly uint32, doc: "Frames recorded (at most capacity)."}
       trigger_index: {type: readonly uint32, doc: "Frame of the trigger sample, in readout order. Valid when DONE."}
-      readout_endpoint: readonly uint16
+      readout_endpoint: {type: readonly uint16, doc: "Endpoint ID of the recorded buffer (0x7F00), read with a buffer read over USB or CAN endpoint access."}
     functions:
       add_channel:
         in: {endpoint_id: uint32}
@@ -1065,46 +981,42 @@ interfaces:
       slip_vel:
         type: readonly float32
         unit: rad/s
-        doc: estimated slip between physical and electrical angular velocity}
+        doc: Estimated slip between physical and electrical angular velocity.
         c_getter: slip_vel_.any().value_or(0.0f)
       phase_offset:
         type: readonly float32
         unit: rad
-        doc: estimate offset between physical and electrical angular position}
+        doc: Estimated offset between physical and electrical angular position.
       stator_phase_vel:
         type: readonly float32
         unit: rad/s
-        doc: calculated setpoint for the electrical velocity}
+        doc: Calculated setpoint for the electrical velocity.
         c_getter: stator_phase_vel_.any().value_or(0.0f)
       stator_phase:
         type: readonly float32
         unit: rad
-        doc: calculated setpoint for the electrical phase}
+        doc: Calculated setpoint for the electrical phase.
         c_getter: stator_phase_.any().value_or(0.0f)
       config:
         c_is_class: False
         attributes:
-          slip_velocity: float32
+          slip_velocity: {type: float32, doc: AC induction motors only (untested on the Mini).}
 
   ODrive.Controller:
     c_is_class: True
     attributes:
       error: 
+        doc: "The controller's errors (bits in `Controller.Error`)."
         nullflag: NONE
         flags:
           OVERSPEED:
             brief: Motor speed exceeded `config.vel_limit * config.vel_limit_tolerance` and `config.enable_overspeed_error` was enabled.
             doc: |
-              Try increasing `config.vel_limit`. The default of 2 turns per second 
-              gives a motor speed of only 120 RPM. Note: Even if
-              you do not command your motor to exceed `config.vel_limit`,
-              sudden changes in the load placed on a motor may cause this speed
-              to be temporarily exceeded, resulting in this error.
-
-              You can also try increasing `config.vel_limit_tolerance`. The
-              default value of 1.2 means it will only allow a 20% violation of
-              the speed limit. You can set `config.enable_overspeed_error` to False
-              to disable this error.
+              Raise `config.vel_limit` (default 2 turn/s, 120 rpm) if the motor
+              is meant to run faster. A sudden change of load can overshoot the
+              limit even when no command exceeds it. `config.vel_limit_tolerance`
+              (default 1.2) sets how far past the limit the speed can go;
+              `config.enable_overspeed_error = False` turns the error off.
           INVALID_INPUT_MODE:
             brief: The `config.input_mode` setting was set to an invalid value. See InputMode for available values
             doc: |
@@ -1113,7 +1025,7 @@ interfaces:
               give desired behavior. For example, in position *control mode*, the position filter *input mode* will
               smooth out `input_pos` commands to give smoother motion.
           UNSTABLE_GAIN:
-            doc: "`motor.config.bandwidth` was set too high to create a stable controller."
+            doc: Not raised by this firmware.
           INVALID_ESTIMATE:
             bit: 5
             doc: Indicates the encoder estimation module declined to output a linear position or velocity value and the exception was caught.
@@ -1127,22 +1039,22 @@ interfaces:
               that you are not getting false index pulses caused by noise. This can happen if you
               are using unshielded cable for the encoder signals.
           POS_LIMIT_VIOLATION:
-            brief: "XDRIVE: the position went beyond `config.pos_min`/`config.pos_max` by more than `config.pos_limit_margin`."
+            brief: "The position went beyond `config.pos_min`/`config.pos_max` by more than `config.pos_limit_margin`."
             doc: Checked only while armed in closed loop. Entering closed loop outside the limits also raises it.
           POS_FOLLOWING_ERROR:
-            brief: "XDRIVE: |pos_setpoint - pos_estimate| exceeded `config.max_pos_error` (position control)."
+            brief: "|pos_setpoint - pos_estimate| exceeded `config.max_pos_error` (position control)."
             doc: Catches jams, collisions and encoder slip. Checked only while armed in closed loop.
           VEL_FOLLOWING_ERROR:
-            brief: "XDRIVE: |vel_setpoint - vel_estimate| exceeded `config.max_vel_error` (velocity or position control)."
+            brief: "|vel_setpoint - vel_estimate| exceeded `config.max_vel_error` (velocity or position control)."
             doc: Checked only while armed in closed loop.
-      last_error_time: float32
+      last_error_time: {type: float32, unit: s, doc: Time since boot of the controller's last error.}
       input_pos:
         type: float32
         unit: turn
         c_setter: set_input_pos
         doc: |
-          Set the desired position of the axis.  Only valid in `CONTROL_MODE_POSITION_CONTROL`.startup.
-          Also updates the step count.
+          The commanded position, in `CONTROL_MODE_POSITION_CONTROL` and `CONTROL_MODE_IMPEDANCE_CONTROL`.
+          Writing it also updates the step count.
           In `INPUT_MODE_TUNING`, this acts as a DC offset for the position sine wave.
       input_vel:
         type: float32
@@ -1163,12 +1075,12 @@ interfaces:
         type: float32
         unit: N·m/turn
         doc: |
-          XDRIVE: stiffness in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
+          Stiffness in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
       input_kd:
         type: float32
         unit: N·m/(turn/s)
         doc: |
-          XDRIVE: damping in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
+          Damping in `CONTROL_MODE_IMPEDANCE_CONTROL`. RAM only; also set by the CAN impedance command.
       pos_setpoint:
         type: readonly float32
         unit: turn
@@ -1180,14 +1092,14 @@ interfaces:
       torque_setpoint: 
         type: readonly float32
         unit: N·m
-        doc: The torque reference actually being used by the torque controller.  This is the same as `input_vel` in `INPUT_MODE_PASSTHROUGH`, but may vary according to `InputMode`.
+        doc: The torque reference actually being used by the torque controller.  This is the same as `input_torque` in `INPUT_MODE_PASSTHROUGH`, but may vary according to `InputMode`.
       trajectory_done: 
         type: readonly bool
         doc: Indicates the last commanded Trapezoidal Trajectory movement is complete.
       timeout_active:
         type: readonly bool
         doc: |
-          XDRIVE: the axis watchdog expired with `axis.config.watchdog_action = DECEL_HOLD`. The controller
+          The axis watchdog expired with `axis.config.watchdog_action = DECEL_HOLD`. The controller
           decelerates to a stop at `axis.config.watchdog_decel`, holds that position and ignores new inputs.
           Ends on `clear_errors()` (feed the watchdog first) or on a new entry into closed loop; the inputs
           are then set to the hold position.
@@ -1195,7 +1107,7 @@ interfaces:
         type: float32
         unit: N·m
         doc: The accumulated value of the velocity loop integrator
-      anticogging_valid: bool
+      anticogging_valid: {type: bool, doc: True once an anticogging map is recorded or loaded (untested on the Mini).}
       autotuning_phase: 
         type: float32
         unit: rad
@@ -1203,8 +1115,8 @@ interfaces:
       config:
         c_is_class: False
         attributes:
-          gain_scheduling_width: float32
-          enable_vel_limit: bool
+          gain_scheduling_width: {type: float32, unit: turn, doc: "Position error below which gain scheduling scales the gains down (`enable_gain_scheduling`)."}
+          enable_vel_limit: {type: bool, doc: "Clamp the velocity setpoint to `vel_limit` (default true)."}
           enable_torque_mode_vel_limit:
             type: bool
             doc: Enable velocity limit in torque control mode (requires a valid velocity estimator).
@@ -1216,8 +1128,8 @@ interfaces:
           enable_overspeed_error: 
             type: bool
             doc: Enables the velocity controller's overspeed error
-          control_mode: {type: ControlMode, c_setter: set_control_mode}
-          input_mode: InputMode
+          control_mode: {type: ControlMode, c_setter: set_control_mode, doc: "Which loops run: torque, velocity, position (the default) or impedance control. [Control](control.md) describes each."}
+          input_mode: {type: InputMode, doc: "How `input_pos`, `input_vel` and `input_torque` become setpoints. Default: `PASSTHROUGH`."}
           pos_gain:
             type: float32
             unit: (turn/s) / turn
@@ -1241,14 +1153,17 @@ interfaces:
           vel_limit_tolerance:
             type: float32
             doc: Ratio to `vel_limit`. Infinity to disable.
-          vel_ramp_rate: 
+          vel_ramp_rate:
             type: float32
             unit: turn/s^2
+            doc: "Rate at which `INPUT_MODE_VEL_RAMP` moves the velocity setpoint toward `input_vel`."
           torque_ramp_rate:
             type: float32
             unit: N·m / sec
+            doc: "Rate at which `INPUT_MODE_TORQUE_RAMP` moves the torque setpoint toward `input_torque`."
           circular_setpoints:
             type: bool
+            doc: "Keep the position setpoint within [0, `circular_setpoint_range`) and control against `encoder.pos_circular`, for continuous rotation. Step/direction input needs it."
           circular_setpoint_range:
             type: float32
             doc: circular range in [turns] for position setpoints when circular_setpoints is True
@@ -1263,6 +1178,7 @@ interfaces:
           inertia:
             type: float32
             unit: N·m/(turn/s^2)
+            doc: "Torque feed-forward per unit of planned acceleration in `VEL_RAMP`, `POS_FILTER` and `TRAP_TRAJ`; `input_torque` adds to it."
           input_filter_bandwidth:
             type: float32
             unit: rad/s
@@ -1272,13 +1188,13 @@ interfaces:
           anticogging:
             c_is_class: False
             attributes:
-              index: readonly uint32
-              pre_calibrated: bool
-              calib_anticogging: readonly bool
-              calib_pos_threshold: float32
-              calib_vel_threshold: float32
-              cogging_ratio: readonly float32
-              anticogging_enabled: bool
+              index: {type: readonly uint32, doc: Map entry the anticogging calibration is at.}
+              pre_calibrated: {type: bool, doc: Keep the anticogging map across reboots (saved with the config).}
+              calib_anticogging: {type: readonly bool, doc: True while the anticogging calibration runs.}
+              calib_pos_threshold: {type: float32, doc: Position error under which the calibration moves to the next map entry.}
+              calib_vel_threshold: {type: float32, doc: Velocity under which the calibration moves to the next map entry.}
+              cogging_ratio: {type: readonly float32, doc: Scale between the encoder's counts and the map's entries.}
+              anticogging_enabled: {type: bool, doc: Add the anticogging map's torque in closed loop (untested on the Mini).}
           mechanical_power_bandwidth:
             type: float32
             doc: "Bandwidth for mechanical power estimate. Used for spinout detection"
@@ -1298,31 +1214,31 @@ interfaces:
           pos_min:
             type: float32
             unit: turn
-            doc: "XDRIVE: soft limit. Trap-trajectory targets and the position setpoint are clamped to [pos_min, pos_max]. -Infinity to disable."
+            doc: "Soft limit. Trap-trajectory targets and the position setpoint are clamped to [`pos_min`, `pos_max`]. -inf (the default) disables it."
           pos_max:
             type: float32
             unit: turn
-            doc: "XDRIVE: soft limit, see pos_min. Infinity to disable."
+            doc: "Soft limit, see `pos_min`. inf (the default) disables it."
           pos_limit_margin:
             type: float32
             unit: turn
-            doc: "XDRIVE: POS_LIMIT_VIOLATION when the position estimate is beyond a limit by more than this."
+            doc: "`POS_LIMIT_VIOLATION` when the position estimate is beyond a limit by more than this. Default 0.1."
           max_pos_error:
             type: float32
             unit: turn
-            doc: "XDRIVE: POS_FOLLOWING_ERROR threshold. Infinity to disable."
+            doc: "`POS_FOLLOWING_ERROR` threshold. inf (the default) disables it."
           max_vel_error:
             type: float32
             unit: turn/s
-            doc: "XDRIVE: VEL_FOLLOWING_ERROR threshold. Infinity to disable."
+            doc: "`VEL_FOLLOWING_ERROR` threshold. inf (the default) disables it."
       autotuning:
         c_is_class: False
         doc: Automatically generate sine waves for frequency-domain response tuning
         attributes:
-          frequency: {type: float32, unit: Hz}
-          pos_amplitude: {type: float32, unit: turns}
-          vel_amplitude: {type: float32, unit: turns/sec}
-          torque_amplitude: {type: float32, unit: N·m}
+          frequency: {type: float32, unit: Hz, doc: "Frequency of the `INPUT_MODE_TUNING` sine wave."}
+          pos_amplitude: {type: float32, unit: turns, doc: Amplitude of the position sine.}
+          vel_amplitude: {type: float32, unit: turns/sec, doc: Amplitude of the velocity sine.}
+          torque_amplitude: {type: float32, unit: N·m, doc: Amplitude of the torque sine.}
       mechanical_power:
         type: readonly float32
         unit: Watt
@@ -1342,41 +1258,35 @@ interfaces:
             usually corresponds roughly to the current position of the axis.'
           }
       start_anticogging_calibration:
-      remove_anticogging_bias: {out: {val: float32}}
-      get_anticogging_value: {in: {index: uint32}, out: {val: float32}}
+        doc: Starts recording the anticogging map (ODrive's procedure, untested on the Mini).
+      remove_anticogging_bias: {out: {val: float32}, doc: Subtracts the map's mean from every entry and returns the mean.}
+      get_anticogging_value: {in: {index: uint32}, out: {val: float32}, doc: One entry of the anticogging map.}
 
 
   ODrive.Encoder:
     c_is_class: True
     attributes:
       error:
+        doc: "The encoder's errors (bits in `Encoder.Error`)."
         nullflag: NONE
         flags:
           UNSTABLE_GAIN:
+            doc: "`config.bandwidth` is too high for the 8 kHz loop (4000 rad/s or more)."
           CPR_POLEPAIRS_MISMATCH:
             doc: |
-              Confirm you have entered the correct count per rotation (CPR) for
-              [your encoder](https://docs.odriverobotics.com/encoders). The
-              ODrive uses your supplied value for the motor pole pairs to
-              measure the CPR. So you should also double check this value.
-              
-              If you are still having issues, you can try to increase
-              `config.calib_scan_distance` up to a factor of 4 above the default.
-
-              If your encoder cpr and motor pole pair settings are correct,
-              this error can be caused because motor cogging makes the motor
-              move less or more than commanded. You can fix this by increasing
-              `config.calib_scan_distance`.
-
-              Note that the AMT encoders are configurable using the micro-
-              switches on the encoder PCB and so you may need to check that
-              these are in the right positions. If your encoder lists its pulse
-              per rotation (PPR) multiply that number by four to get CPR.
+              During offset calibration the encoder moved a different distance than
+              `config.cpr` and the motor's `pole_pairs` predict, by more than
+              `config.calib_range`. Check both values (the onboard AS5047: cpr 16384;
+              pole pairs: magnets / 2). A rotor that stalls or slips during the scan
+              (too little `calibration_current`, cogging, or a load) causes it too:
+              raise `config.calib_scan_distance` (up to 4 times the default) or the
+              calibration current. For an incremental encoder, CPR is 4 times its
+              pulses per revolution.
           NO_RESPONSE:
             doc: |
-              Confirm that your encoder is plugged into the right pins on the
-              ODrive board.
+              Check the encoder's wiring and `config.mode`.
           UNSUPPORTED_ENCODER_MODE:
+            doc: "`config.mode` has a value the firmware doesn't support."
           ILLEGAL_HALL_STATE:
             doc: |
               Hall effect encoder only have 6 valid states out of 8 (2^3) possible states.
@@ -1385,15 +1295,21 @@ interfaces:
               22nF capacitors between the encoder A,B,Z pins and ground to filter out noise.
           INDEX_NOT_FOUND_YET:
             doc: |
-              Check that your encoder is a model that has an index pulse. If
-              your encoder does not have a wire connected to pin Z on your
-              ODrive then it does not output an index pulse.
+              Check that the encoder has an index pulse wired to Z (J5 pin 2 on the Mini).
           ABS_SPI_TIMEOUT:
+            doc: Not raised by this firmware.
           ABS_SPI_COM_FAIL:
+            doc: |
+              Too many absolute-encoder samples were missing or dropped: `spi_error_rate`, a
+              filtered rate, rose above 5 %. Frame checks (`config.abs_spi_check_parity`,
+              `abs_spi_reject_error_flag`, `abs_spi_max_jump`) count dropped frames as missing,
+              so a wrong parity setting for the chip causes it too.
           ABS_SPI_NOT_READY:
+            doc: Not raised by this firmware.
           HALL_NOT_CALIBRATED_YET:
-      is_ready: readonly bool
-      index_found: readonly bool
+            doc: Hall encoder mode needs `AXIS_STATE_ENCODER_HALL_PHASE_CALIBRATION` first.
+      is_ready: {type: readonly bool, doc: "True once the encoder's offset is known: after offset calibration, or at boot for a `pre_calibrated` absolute encoder on its first valid read."}
+      index_found: {type: readonly bool, doc: True once the index search found the index pulse.}
       shadow_count: 
         type: readonly int32
         unit: counts
@@ -1402,8 +1318,8 @@ interfaces:
         type: readonly int32
         unit: counts
         doc: Raw circular count from the encoder on [0, cpr)
-      interpolation: readonly float32
-      phase: {type: readonly float32, c_getter: phase_.any().value_or(0.0f)}
+      interpolation: {type: readonly float32, doc: "Fraction of a count interpolated between encoder edges (`config.enable_phase_interpolation`)."}
+      phase: {type: readonly float32, unit: rad, c_getter: phase_.any().value_or(0.0f), doc: Electrical angle used for commutation.}
       pos_estimate: 
         type: readonly float32
         c_getter: pos_estimate_.any().value_or(0.0f)
@@ -1426,7 +1342,7 @@ interfaces:
         type: readonly float32
         unit: counts
         doc: Circular position delta of the encoder in the most recent loop. Primarily for debug purposes, it indicates much the encoder changed since the last time it was checked.
-      hall_state: readonly uint8
+      hall_state: {type: readonly uint8, doc: The three hall inputs as bits (hall encoder mode).}
       vel_estimate: 
         type: readonly float32
         c_getter: vel_estimate_.any().value_or(0.0f)
@@ -1436,25 +1352,25 @@ interfaces:
         type: readonly float32
         unit: counts/sec
         doc: Estimate of the linear velocity of an axis, in counts/s.
-      calib_scan_response: readonly float32
+      calib_scan_response: {type: readonly float32, unit: counts, doc: Encoder movement measured during the last offset calibration scan.}
       pos_abs:
         type: int32
         doc: The last (valid) position from an absolute encoder, if used.
-      spi_error_rate: readonly float32
-      spi_frame_count: {type: readonly uint32, doc: "XDRIVE: absolute-encoder SPI frames received."}
-      spi_error_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with the error flag (bit 14) set."}
-      spi_warning_flag_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with bit 15 set (AS5047U warning flag; AS5047P parity)."}
-      spi_jump_count: {type: readonly uint32, doc: "XDRIVE: samples dropped because they jumped further than config.abs_spi_max_jump."}
-      spi_last_frame: {type: readonly uint16, doc: "XDRIVE: last raw AMS SPI frame."}
-      spi_parity_error_count: {type: readonly uint32, doc: "XDRIVE: AMS frames with odd parity (meaningful for an AS5047P)."}
-      pos_abs_raw: {type: readonly int32, doc: "XDRIVE: last good raw absolute position, before the correction table."}
-      correction_rms: {type: readonly float32, unit: counts, doc: "XDRIVE: rms encoder error measured by the last correction calibration."}
-      correction_peak: {type: readonly float32, unit: counts, doc: "XDRIVE: largest |error| measured by the last correction calibration."}
-      correction_bins: {type: readonly uint32, doc: "XDRIVE: bins the last correction calibration covered in both directions (256 = all)."}
+      spi_error_rate: {type: readonly float32, doc: "Filtered fraction of control periods without a valid absolute-encoder sample; above 0.05 raises `ABS_SPI_COM_FAIL`."}
+      spi_frame_count: {type: readonly uint32, doc: "Absolute-encoder SPI frames received."}
+      spi_error_flag_count: {type: readonly uint32, doc: "AMS frames with the error flag (bit 14) set."}
+      spi_warning_flag_count: {type: readonly uint32, doc: "AMS frames with bit 15 set (AS5047U warning flag; AS5047P parity)."}
+      spi_jump_count: {type: readonly uint32, doc: "Samples dropped because they jumped further than `config.abs_spi_max_jump`."}
+      spi_last_frame: {type: readonly uint16, doc: "Last raw AMS SPI frame."}
+      spi_parity_error_count: {type: readonly uint32, doc: "AMS frames with odd parity (meaningful for an AS5047P)."}
+      pos_abs_raw: {type: readonly int32, doc: "Last good raw absolute position, before the correction table."}
+      correction_rms: {type: readonly float32, unit: counts, doc: "RMS encoder error measured by the last correction calibration."}
+      correction_peak: {type: readonly float32, unit: counts, doc: "Largest |error| measured by the last correction calibration."}
+      correction_bins: {type: readonly uint32, doc: "Bins the last correction calibration covered in both directions (256 = all)."}
       config:
         c_is_class: False
         attributes:
-          mode: Mode
+          mode: {type: Mode, doc: "Encoder type. The onboard AS5047 is `SPI_ABS_AMS` (257); the default is `INCREMENTAL`."}
           use_index: 
             type: bool
             c_setter: set_use_index
@@ -1468,46 +1384,48 @@ interfaces:
           find_idx_on_lockin_only: 
             type: bool
             c_setter: set_find_idx_on_lockin_only
-          abs_spi_cs_gpio_pin: 
+            doc: Look for the index pulse only during lock-in spin.
+          abs_spi_cs_gpio_pin:
             type: uint16
             c_setter: set_abs_spi_cs_gpio_pin
-            doc: Make sure that the GPIO is in `GPIO_MODE_DIGITAL`.
+            doc: "Chip-select GPIO of an SPI absolute encoder: 7 for the Mini's onboard AS5047, 6 for one on J4. The GPIO must be in `GPIO_MODE_DIGITAL`."
           abs_spi_max_jump:
             type: uint16
             unit: counts
-            doc: "XDRIVE: drop an absolute-encoder sample that is further than this from the last good one (0 = off). Accepted after 3 in a row."
+            doc: "Drop an absolute-encoder sample further than this from the last good one (default 1024, 1/16 turn of the AS5047; 0 turns it off). Active after 16 good samples; a fourth sample in a row at the new position is accepted."
           correction_enabled:
             type: bool
-            doc: "XDRIVE: add the correction table (get_correction/set_correction) to the raw absolute position."
+            doc: "Add the correction table (`get_correction`, `set_correction`) to the raw absolute position. Default false; the correction calibration sets it."
           correction_scan_turns:
             type: float32
             unit: turns
-            doc: "XDRIVE: mechanical turns each way for AXIS_STATE_ENCODER_CORRECTION_CALIBRATION."
+            doc: "Mechanical turns each way for `AXIS_STATE_ENCODER_CORRECTION_CALIBRATION`. Default 1."
           correction_max_harmonic:
             type: uint8
-            doc: "XDRIVE: the correction calibration keeps harmonics 1..N per turn of the measured error (0 = raw bins). Higher orders are cogging, not encoder error."
+            doc: "The correction calibration keeps harmonics 1 to N per turn of the measured error (default 12; 0 keeps the raw bins). Higher orders are cogging, not encoder error."
           abs_spi_check_parity:
             type: bool
-            doc: "XDRIVE: drop AMS frames with odd parity. For an AS5047P (bit 15 = even parity); an AS5047U has none."
+            doc: "Drop AMS frames with odd parity (default false). For an AS5047P (bit 15 = even parity); an AS5047U has none."
           abs_spi_reject_error_flag:
             type: bool
-            doc: "XDRIVE: drop AMS frames with the error flag set. Off by default; the flag is sticky until the chip's ERRFL register is read."
+            doc: "Drop AMS frames with the error flag set (default false). The flag stays set until the chip's ERRFL register is read."
           cpr: 
             type: int32
             doc: Counts per Revolution of the encoder.  This is 4x the Pulses per Revolution.
-          phase_offset: int32
-          phase_offset_float: float32
-          direction: int32
-          pre_calibrated: {type: bool, c_setter: set_pre_calibrated}
-          enable_phase_interpolation: bool
-          bandwidth: 
+          phase_offset: {type: int32, unit: counts, doc: "Encoder count at the rotor's electrical zero, measured by offset calibration."}
+          phase_offset_float: {type: float32, unit: counts, doc: "Fractional part of `phase_offset`."}
+          direction: {type: int32, doc: "+1 or -1: whether the encoder counts up with the electrical angle. Measured by offset calibration."}
+          pre_calibrated: {type: bool, c_setter: set_pre_calibrated, doc: "Keep the offset calibration across reboots. With an absolute encoder, the board is ready at boot without a calibration sweep."}
+          enable_phase_interpolation: {type: bool, doc: Interpolate the commutation angle between encoder counts.}
+          bandwidth:
             type: float32
             c_setter: set_bandwidth
             unit: rad/s
-          calib_range: 
+            doc: "Bandwidth of the PLL that estimates position and velocity. Commutation uses the raw count, so it affects only the position and velocity loops. Default 1000."
+          calib_range:
             type: float32
             unit: turn
-            doc: The error threshold for encoder offset calibration, in turns.  If the
+            doc: "Offset calibration fails with `CPR_POLEPAIRS_MISMATCH` when the measured movement differs from the expected by more than this fraction. Default 0.02."
           calib_scan_distance: 
             type: float32
             unit: rad (electrical)
@@ -1525,8 +1443,8 @@ interfaces:
           ignore_illegal_hall_state: 
             type: bool
             doc: Ignore the error "Illegal Hall State"
-          hall_polarity: uint8
-          hall_polarity_calibrated: bool
+          hall_polarity: {type: uint8, doc: Hall input polarity bits, set by the hall polarity calibration.}
+          hall_polarity_calibrated: {type: bool, doc: True once the hall polarity calibration ran.}
           sincos_gpio_pin_sin:
             type: uint16
             doc: Analog sine signal of a sin/cos encoder. The corresponding GPIO must be in `GPIO_MODE_ANALOG_IN`.
@@ -1540,30 +1458,33 @@ interfaces:
             type: int32
             unit: counts
         doc: Set the current linear position of the axis, in counts
-      get_correction: {in: {index: uint32}, out: {val: float32}, doc: "XDRIVE: correction table entry (0..255), counts."}
-      set_correction: {in: {index: uint32, val: float32}, doc: "XDRIVE: set a correction table entry (0..255), counts."}
+      get_correction: {in: {index: uint32}, out: {val: float32}, doc: "Correction table entry `index` (0 to 255), in counts."}
+      set_correction: {in: {index: uint32, val: float32}, doc: "Sets correction table entry `index` (0 to 255), in counts. RAM only until saved."}
 
 
   ODrive.SensorlessEstimator:
     c_is_class: True
     attributes:
       error:
+        doc: "The sensorless estimator's errors (bits in `SensorlessEstimator.Error`)."
         nullflag: NONE
         flags:
           UNSTABLE_GAIN:
+            doc: "`config.pll_bandwidth` is too high for the 8 kHz loop."
           UNKNOWN_CURRENT_MEASUREMENT:
-      phase: {type: readonly float32, unit: rad, c_getter: phase_.any().value_or(0.0f)}
-      pll_pos: {type: readonly float32, unit: rad}
-      phase_vel: {type: readonly float32, unit: rad/s, c_getter: phase_vel_.any().value_or(0.0f)}
-      vel_estimate: {type: readonly float32, unit: turn/s, c_getter: vel_estimate_.any().value_or(0.0f)}
+            doc: The estimator got no valid current measurement.
+      phase: {type: readonly float32, unit: rad, c_getter: phase_.any().value_or(0.0f), doc: Estimated electrical angle.}
+      pll_pos: {type: readonly float32, unit: rad, doc: Electrical angle tracked by the estimator's PLL.}
+      phase_vel: {type: readonly float32, unit: rad/s, c_getter: phase_vel_.any().value_or(0.0f), doc: Estimated electrical angular velocity.}
+      vel_estimate: {type: readonly float32, unit: turn/s, c_getter: vel_estimate_.any().value_or(0.0f), doc: Estimated mechanical velocity.}
       # pll_kp: float32
       # pll_ki: float32
       config:
         c_is_class: False
         attributes:
-          observer_gain: float32
-          pll_bandwidth: float32
-          pm_flux_linkage: float32
+          observer_gain: {type: float32, doc: Gain of the flux observer (sensorless mode, untested on the Mini).}
+          pll_bandwidth: {type: float32, unit: rad/s, doc: Bandwidth of the estimator's PLL.}
+          pm_flux_linkage: {type: float32, unit: Wb, doc: "The motor's flux linkage: 5.51328895422 / (pole pairs x KV)."}
 
 
   ODrive.TrapezoidalTrajectory:
@@ -1572,22 +1493,22 @@ interfaces:
       config:
         c_is_class: False
         attributes:
-          vel_limit: {type: float32, unit: turn/s}
-          accel_limit: {type: float32, unit: turn/s^2}
-          decel_limit: {type: float32, unit: turn/s^2}
+          vel_limit: {type: float32, unit: turn/s, doc: "Cruise speed of a trapezoidal move. Keep `controller.config.vel_limit` at least 10 % above it."}
+          accel_limit: {type: float32, unit: turn/s^2, doc: Acceleration of a trapezoidal move.}
+          decel_limit: {type: float32, unit: turn/s^2, doc: Deceleration of a trapezoidal move.}
 
   ODrive.Endstop:
     c_is_class: True
     attributes:
-      endstop_state: readonly bool
+      endstop_state: {type: readonly bool, doc: True while the endstop is pressed (after debouncing).}
       config:
         c_is_class: False
         attributes:
-          gpio_num: {type: uint16, c_setter: set_gpio_num, doc: Make sure the corresponding GPIO is in `GPIO_MODE_DIGITAL`.}
-          enabled: {type: bool, c_setter: set_enabled}
-          offset: {type: float32, unit: turns}
-          is_active_high: bool
-          debounce_ms: {type: uint32, c_setter: set_debounce_ms}
+          gpio_num: {type: uint16, c_setter: set_gpio_num, doc: The endstop's GPIO; it must be in a `GPIO_MODE_DIGITAL` mode.}
+          enabled: {type: bool, c_setter: set_enabled, doc: Enables the endstop. Outside homing, a pressed endstop sets `MIN_ENDSTOP_PRESSED` or `MAX_ENDSTOP_PRESSED`.}
+          offset: {type: float32, unit: turns, doc: Position the axis takes at the endstop after homing.}
+          is_active_high: {type: bool, doc: True when the input reads high while pressed.}
+          debounce_ms: {type: uint32, c_setter: set_debounce_ms, doc: Time the input must stay at a level before it counts.}
 
   ODrive.MechanicalBrake:
     c_is_class: True
@@ -1595,23 +1516,23 @@ interfaces:
       config:
         c_is_class: False
         attributes:
-          gpio_num: {type: uint16, c_setter: set_gpio_num}
-          is_active_low: bool
+          gpio_num: {type: uint16, c_setter: set_gpio_num, doc: "GPIO that drives the brake; it must be in `GPIO_MODE_MECH_BRAKE`."}
+          is_active_low: {type: bool, doc: True when a low output engages the brake.}
     functions:
       engage:
         doc: |
           This function engages the mechanical brake if one is present and enabled.
       release:
         doc: |
-          This function releases the mecahncal brake if one is present and enabled.
+          This function releases the mechanical brake if one is present and enabled.
 
   ODrive.TaskTimer:
     c_is_class: True
     attributes:
-      start_time: readonly uint32
-      end_time: readonly uint32
-      length: readonly uint32
-      max_length: uint32
+      start_time: {type: readonly uint32, unit: ticks, doc: "Start of the task in the profiled control period, as a TIM13 timestamp in 168 MHz ticks. Recorded when `task_timers_armed` is set."}
+      end_time: {type: readonly uint32, unit: ticks, doc: End of the task in the profiled control period.}
+      length: {type: readonly uint32, unit: ticks, doc: "The task's duration in the profiled control period (168 ticks = 1 µs)."}
+      max_length: {type: uint32, unit: ticks, doc: The task's longest duration since boot; write 0 to reset it.}
 
   ODrive3:
     c_is_class: True
@@ -1661,17 +1582,15 @@ valuetypes:
           The pin can be used for one or more of these functions:
           Sin/cos encoders, analog input, `get_adc_voltage()`.
       UART_A: {doc: See `config.enable_uart_a`.}
-      UART_B: {doc: This mode is not supported on ODrive v3.x.}
+      UART_B: {doc: "See `config.enable_uart_b` (GPIO3 TX, GPIO4 RX)."}
       UART_C: {doc: This mode is not supported on ODrive v3.x.}
       CAN_A: {doc: See `config.enable_can_a`.}
       I2C_A: {doc: See `config.enable_i2c_a`.}
-      SPI_A: {doc: Note that the SPI pins on ODrive v3.x are hardwired so they
-        cannot be configured through software. Consequently, even though SPI_A
-        is exposed, this mode is of no use on ODrive v3.x.}
+      SPI_A: {doc: The SPI pins are fixed in hardware on ODrive v3.x boards and the Mini, so this mode has no use there.}
       PWM: {doc: See `config.gpio1_pwm_mapping`.}
       ENC0: {doc: The pin is used by quadrature encoder 0.}
       ENC2: {value: 13, doc: This mode is not supported on ODrive v3.x.}
-      MECH_BRAKE: {doc: This is to support external mechanical brakes.}
+      MECH_BRAKE: {doc: "Drives an external mechanical brake (`axis0.mechanical_brake`)."}
       STATUS: {doc: The pin is used for status output (see `config.error_gpio_pin`)}
 
   ODrive.StreamProtocolType:
@@ -1679,13 +1598,10 @@ valuetypes:
       Fibre:
         doc: |
           Machine-to-machine protocol which gives access to all features of the
-          ODrive. This protocol is used by the official odrivetool and GUI.
-          Developers who wish to interact with this protocol are advised to do
-          so through libfibre.
+          board. The host tools and the `xdrive` library speak it over USB.
       Ascii:
         doc: |
-          Human readable protocol designed for easy implementation for cases
-          where the use of libfibre is not desired or feasible.
+          Human-readable protocol for hosts that don't speak Fibre.
           Refer to [ODrive's ASCII protocol page](https://docs.odriverobotics.com/v/0.5.6/ascii-protocol.html) for details.
       Stdout: {doc: Output of printf(). Only intended for developers who modify
           ODrive firmware.}
@@ -1708,28 +1624,25 @@ valuetypes:
   ODrive.Can.Protocol:
     flags: 
       SIMPLE:
-        doc: CANSimple, an ODrive-specific protocol for basic functionality
+        doc: "CANSimple, ODrive's CAN protocol, with this firmware's impedance command (0x01E) and endpoint access (0x01F)."
 
   ODrive.Axis.AxisState: # TODO: remove redundant "Axis" in name
     values:
       UNDEFINED:
-        doc: will fall through to idle
+        doc: No request. `requested_state` reads this once the state machine has taken a request.
       IDLE:
         brief: Disable motor PWM and do nothing.
       STARTUP_SEQUENCE:
         brief: Run the startup procedure.
-        doc: the actual sequence is defined by the `config`.startup... flags
+        doc: "The `config.startup_*` flags choose the steps."
       FULL_CALIBRATION_SEQUENCE:
         doc: Run motor calibration and then encoder offset calibration (or encoder
           index search if `<axis>.encoder.config.use_index` is `True`).
       MOTOR_CALIBRATION:
         brief: Measure phase resistance and phase inductance of the motor.
         doc: |
-           * To store the results set `motor.config.pre_calibrated` to `True`
-           and save the configuration (`save_configuration()`). After that you
-           don't have to run the motor calibration on the next start up.
-           * This modifies the variables `motor.config.phase_resistance` and
-           `motor.config.phase_inductance`.
+          Writes `motor.config.phase_resistance` and `motor.config.phase_inductance`. Saved with
+          `motor.config.pre_calibrated = True`, the results make this calibration unnecessary at the next boot.
       ENCODER_INDEX_SEARCH:
         brief: Turn the motor in one direction until the encoder index is traversed.
         doc: This state can only be entered if `encoder.config.use_index` is `True`.
@@ -1737,15 +1650,13 @@ valuetypes:
       ENCODER_OFFSET_CALIBRATION:
         brief: Turn the motor in one direction for a few seconds and then back to measure the offset between the encoder position and the electrical phase.
         doc: |
-           * Can only be entered if the motor is calibrated (`motor.is_calibrated`).
-           * A successful encoder calibration will make the `encoder.is_ready`
-           go to true.
+          Needs a calibrated motor (`motor.is_calibrated`). Success sets `encoder.is_ready`.
       CLOSED_LOOP_CONTROL:
         brief: Run closed loop control.
         doc: |
-           * The action depends on the `controller.config.control_mode`.
-           * Can only be entered if the motor is calibrated
-           (`motor.is_calibrated`) and the encoder is ready (`encoder.is_ready`).
+          What runs depends on `controller.config.control_mode`. Needs a calibrated motor
+          (`motor.is_calibrated`) and a ready encoder (`encoder.is_ready`). Entering it starts
+          from rest: zero velocity and torque setpoints, no running trajectory.
       LOCKIN_SPIN:
         brief: Run lockin spin.
         doc: |
@@ -1769,33 +1680,36 @@ valuetypes:
         doc:
           The phase offset is not calibrated at this time, so the map is only relative
       ENCODER_CORRECTION_CALIBRATION:
-        brief: "XDRIVE: measure the absolute encoder's per-angle error and fill encoder.config.correction_table"
+        brief: "Measure the absolute encoder's per-angle error and fill the encoder's correction table"
         doc:
-          Turns an open-loop current vector (calibration_current, calib_scan_omega) forward and back over
-          encoder.config.correction_scan_turns mechanical turns. Needs a calibrated motor and a ready encoder.
-          Re-run ENCODER_OFFSET_CALIBRATION afterwards, then save.
+          Turns an open-loop current vector (`motor.config.calibration_current`, `encoder.config.calib_scan_omega`) forward and back over
+          `encoder.config.correction_scan_turns` mechanical turns. Needs a calibrated motor and a ready encoder.
+          Run `ENCODER_OFFSET_CALIBRATION` again afterwards, then save.
 
   ODrive.Axis.WatchdogAction:
     values:
       DISARM:
-        doc: Set AXIS_ERROR_WATCHDOG_TIMER_EXPIRED and disarm (the motor goes limp). Stock ODrive behavior.
+        doc: "Set `AXIS_ERROR_WATCHDOG_TIMER_EXPIRED` and disarm (the motor goes limp): ODrive's behavior."
       DECEL_HOLD:
         doc: |
-          XDRIVE: decelerate to a stop at `config.watchdog_decel`, then hold that position with torque capped at
+          Decelerate to a stop at `config.watchdog_decel`, then hold that position with torque capped at
           `config.watchdog_torque_lim`. Reported by `controller.timeout_active`, not as an error.
           Outside armed closed loop the watchdog disarms with an error as in DISARM.
 
   ODrive.Encoder.Mode:
     values:
       INCREMENTAL:
+        doc: Quadrature encoder on J5 (A, B and an optional index Z).
       HALL:
+        doc: Hall sensors on J5.
       SINCOS:
+        doc: "Analog sine and cosine signals on two GPIOs (`config.sincos_gpio_pin_sin`, `sincos_gpio_pin_cos`)."
       SPI_ABS_CUI:
         value: 0x100
         doc: Compatible with CUI AMT23xx
       SPI_ABS_AMS:
         value: 0x101
-        doc: Compatible with AMS AS5047P, AS5048A/AS5048B (no daisy chain support)
+        doc: "AMS AS5047P/U (the Mini's onboard encoder), AS5048A/AS5048B (no daisy chain support)."
       SPI_ABS_AEAT:
         value: 0x102
         doc: Supports AEAT-8800
@@ -1829,7 +1743,7 @@ valuetypes:
           Use `input_pos` to command desired position, `input_vel` to command velocity feed-forward, and `input_torque` for torque feed-forward.
       IMPEDANCE_CONTROL:
         doc: |
-          XDRIVE: a spring and damper toward the setpoint, computed every control period:
+          A spring and damper toward the setpoint, computed every control period:
           torque = input_kp * (pos_setpoint - pos) + input_kd * (vel_setpoint - vel) + torque_setpoint.
           No velocity integrator, no position gain scheduling; a steady load deflects the axis by load / input_kp.
           input_kp = input_kd = 0 is torque control (without `enable_torque_mode_vel_limit`); input_kp = 0 damps only.
@@ -1842,88 +1756,35 @@ valuetypes:
       INACTIVE:
         brief: Disable inputs. Setpoints retain their last value.
       PASSTHROUGH:
-        brief: Pass `input_xxx` through to `xxx_setpoint` directly.
-        doc: |
-          ### Valid Inputs:
-          * `input_pos`
-          * `input_vel`
-          * `input_torque`
-
-          ### Valid Control modes:
-          * `CONTROL_MODE_VOLTAGE_CONTROL`
-          * `CONTROL_MODE_TORQUE_CONTROL`
-          * `CONTROL_MODE_VELOCITY_CONTROL`
-          * `CONTROL_MODE_POSITION_CONTROL`
+        brief: Pass `input_pos`, `input_vel` and `input_torque` through to the setpoints directly.
+        doc: For every control mode; the usual mode for impedance control and for a host that streams a smooth trajectory.
       VEL_RAMP:
-        brief: Ramps a velocity command from the current value to the target value.
-        doc: |
-          ### Configuration Values:
-          * `config.vel_ramp_rate` [turn/s]
-          * `config.inertia` [N·m/(turn/s^2))]
-
-          ### Valid inputs:
-          * `input_vel`
-          * `input_torque` (feed-forward, added to the `config.inertia` term)
-
-          ### Valid Control Modes:
-          * `CONTROL_MODE_VELOCITY_CONTROL`
+        brief: Ramps the velocity setpoint toward `input_vel` at `config.vel_ramp_rate`.
+        doc: Velocity control. `config.inertia` times the ramp's acceleration, plus `input_torque`, is the torque feed-forward.
       POS_FILTER:
-        brief: Implements a 2nd order position tracking filter.
+        brief: Smooths `input_pos` with a critically damped second-order filter.
         doc: |
-          Intended for use with step/dir interface, but can also be used with
-          position-only commands.
-
-          Step response: [Control](control.md#position-filter-3).
-          Result of a step command from 1000 to 0
-
-          ### Configuration Values:
-          * `config.input_filter_bandwidth`
-          * `config.inertia`
-
-          ### Valid inputs:
-          * `input_pos`
-          * `input_torque` (feed-forward, added to the `config.inertia` term)
-
-          ### Valid Control modes:
-          * `CONTROL_MODE_POSITION_CONTROL`
+          Position control. `config.input_filter_bandwidth` sets the filter; `config.inertia` times the
+          filter's acceleration, plus `input_torque`, is the torque feed-forward. Step response:
+          [Control](control.md#position-filter-3).
       MIX_CHANNELS:
-        brief: Not Implemented.
+        brief: Not implemented.
       TRAP_TRAJ:
-        brief: Implementes an online trapezoidal trajectory planner.
+        brief: Plans a trapezoidal move to each new `input_pos`.
         doc: |
-          A move: [Control](control.md#trapezoidal-trajectory-5).
-
-          ### Configuration Values:
-          * `Axis:trap_traj.config.vel_limit`
-          * `Axis:trap_traj.config.accel_limit`
-          * `Axis:trap_traj.config.decel_limit`
-          * `config.inertia`
-
-          ### Valid Inputs:
-          * `input_pos`
-          * `input_torque` (feed-forward, added to the `config.inertia` term during a move, and applied alone after it)
-
-          ### Valid Control Modes:
-          * `CONTROL_MODE_POSITION_CONTROL`
-          * `CONTROL_MODE_IMPEDANCE_CONTROL`
+          Position or impedance control. `axis0.trap_traj.config.vel_limit`, `accel_limit` and `decel_limit`
+          shape the move; `config.inertia` times the planned acceleration, plus `input_torque`, is the torque
+          feed-forward during the move, and `input_torque` alone after it. A move:
+          [Control](control.md#trapezoidal-trajectory-5).
       TORQUE_RAMP:
-        brief: Ramp a torque command from the current value to the target value.
-        doc: |
-          ### Configuration Values:
-          * `config.torque_ramp_rate`
-
-          ### Valid Inputs:
-          * `input_torque`
-
-          ### Valid Control Modes:
-          * `CONTROL_MODE_TORQUE_CONTROL`
+        brief: Ramps the torque setpoint toward `input_torque` at `config.torque_ramp_rate`.
+        doc: Torque control.
       TUNING:
         value: 8
-        brief: Implements a tuning mode
+        brief: Adds sine waves to the inputs, for frequency-response tuning.
         doc: |
-          Used for tuning your odrive, this mode allows the user to set different frequencies.
-          Set control_mode for the loop you want to tune, then set the frequency desired.
-          The ODrive will send a 1 turn amplitude sine wave to the controller with the given frequency and phase.
+          Set `control_mode` for the loop to tune and the `controller.autotuning` frequency and
+          amplitudes; `input_pos`, `input_vel` and `input_torque` act as the sine waves' DC offsets.
 
   ODrive.Motor.MotorType:
     values:

@@ -6,7 +6,7 @@ The controller is a cascade of position, velocity and current loops, as in ODriv
 
 - **Position control** (`control_mode = POSITION_CONTROL`, 3) runs all three loops. The position loop is proportional: velocity command = `pos_gain` × position error + velocity feed-forward, clamped to `vel_limit`.
 - **Velocity control** (2) starts at the velocity loop, a PI controller: torque = `vel_gain` × velocity error + integral + torque feed-forward. `vel_integrator_gain` sets how fast the integral grows.
-- **Torque control** (1) uses only the current loop: torque / `torque_constant` gives the current command, clamped to `current_lim`. The current loop's gains follow from `motor.config.current_control_bandwidth` and the measured phase resistance and inductance.
+- **Torque control** (1) uses only the current loop: torque / `torque_constant` gives the current command, clamped to `current_lim`. The current loop is a PI controller whose gains follow from `motor.config.current_control_bandwidth` and the measured phase resistance and inductance (p = bandwidth × L, i = bandwidth × R); writing the bandwidth recomputes them at once.
 - **Impedance control** (4), added by this firmware: see [below](#impedance-control).
 
 Entering closed loop starts from rest in every mode: the velocity and torque setpoints are zero and no trajectory is running, so the motor holds where it is.

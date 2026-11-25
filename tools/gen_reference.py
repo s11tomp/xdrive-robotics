@@ -137,8 +137,8 @@ def render(reg, upstream):
     out = [
         "# Property reference",
         "",
-        "Every object, property, function, enum and error bit the firmware exposes over USB, as `odrivetool` and the "
-        "host tools see them (`odrv0.axis0.controller.config.pos_gain`). Items marked *(added)* are not in ODrive "
+        "Every object, property, function, enum and error bit the firmware exposes over USB, as the host tools "
+        "and the `xdrive` library see them (`odrv.axis0.controller.config.pos_gain`). Items marked *(added)* are not in ODrive "
         "v0.5.6. Access: `rw` can be written, `ro` is read-only. Settings under a `config` object persist after "
         "`save_configuration()`; everything else resets at boot.",
         "",
